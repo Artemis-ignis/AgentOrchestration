@@ -24,6 +24,28 @@ class TestMetricsCollector:
         assert snapshot["histograms"]["response.time"]["count"] == 2
         assert snapshot["histograms"]["response.time"]["avg"] == 1.0
 
+    def test_snapshot_mutation_does_not_change_metrics(self):
+        self.metrics.increment("requests.total", 4)
+        self.metrics.gauge("memory.usage", 85.5)
+        self.metrics.observe("response.time", 0.5)
+        self.metrics.observe("response.time", 1.5)
+
+        snapshot = self.metrics.snapshot()
+        snapshot["counters"]["requests.total"] = 0
+        snapshot["gauges"]["memory.usage"] = 0.0
+        snapshot["histograms"]["response.time"]["count"] = 0
+        snapshot["histograms"]["response.time"]["sum"] = 0.0
+        snapshot["histograms"]["response.time"]["avg"] = 0.0
+
+        fresh_snapshot = self.metrics.snapshot()
+        assert fresh_snapshot["counters"]["requests.total"] == 4
+        assert fresh_snapshot["gauges"]["memory.usage"] == 85.5
+        assert fresh_snapshot["histograms"]["response.time"] == {
+            "count": 2,
+            "sum": 2.0,
+            "avg": 1.0,
+        }
+
     def test_timer(self):
         self.metrics.start_timer("operation")
         import time
