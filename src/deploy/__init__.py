@@ -8,6 +8,8 @@ from .rollout import (
     MigrationJob,
     MigrationResult,
     ReleaseCheck,
+    load_rollout_manifest,
+    rollout_from_manifest,
 )
 
 __all__ = [
@@ -18,4 +20,6 @@ __all__ = [
     "MigrationJob",
     "MigrationResult",
     "ReleaseCheck",
+    "load_rollout_manifest",
+    "rollout_from_manifest",
 ]
