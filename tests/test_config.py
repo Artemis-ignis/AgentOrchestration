@@ -1,5 +1,6 @@
 import pytest
-from src.common.config import Config
+import src.common.config as config_module
+from src.common.config import Config, ConfigEnvCollisionError
 
 
 class TestConfig:
@@ -31,6 +32,34 @@ class TestConfig:
         data = config.to_dict()
         assert data["key1"] == "value1"
         assert data["key2"] == "value2"
+
+    def test_env_override_case_collision_is_rejected(self, monkeypatch):
+        monkeypatch.setattr(
+            config_module.os,
+            "environ",
+            {
+                "AO_APP_PORT": "8080",
+                "AO_app_port": "9090",
+            },
+        )
+
+        with pytest.raises(ConfigEnvCollisionError, match="app.port"):
+            Config()
+
+    def test_env_override_unique_keys_still_apply(self, monkeypatch):
+        monkeypatch.setattr(
+            config_module.os,
+            "environ",
+            {
+                "AO_APP_PORT": "8080",
+                "AO_DATABASE_HOST": "localhost",
+            },
+        )
+
+        config = Config()
+
+        assert config.get("app.port") == "8080"
+        assert config.get("database.host") == "localhost"
 
 # 2019-02-01T18:58:35 update
 

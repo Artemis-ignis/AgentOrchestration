@@ -1,8 +1,12 @@
 """Configuration management module."""
 
-import os
 import json
+import os
 from typing import Any, Dict, Optional
+
+
+class ConfigEnvCollisionError(ValueError):
+    """Raised when environment overrides map to the same config key."""
 
 
 class Config:
@@ -18,9 +22,18 @@ class Config:
 
     def _load_env_overrides(self) -> None:
         prefix = "AO_"
+        normalized_keys: Dict[str, str] = {}
         for key, value in os.environ.items():
             if key.startswith(prefix):
                 config_key = key[len(prefix):].lower().replace("_", ".")
+                previous_key = normalized_keys.get(config_key)
+                if previous_key and previous_key != key:
+                    raise ConfigEnvCollisionError(
+                        "Environment overrides "
+                        f"{previous_key!r} and {key!r} both map to "
+                        f"{config_key!r}"
+                    )
+                normalized_keys[config_key] = key
                 self._set_nested(config_key, value)
 
     def _set_nested(self, key: str, value: Any) -> None:
