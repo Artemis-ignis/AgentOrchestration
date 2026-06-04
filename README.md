@@ -1,4 +1,14 @@
-# Agent Orchestration Platform for Enterprises
+﻿# Agent Orchestration Platform for Enterprises
+
+<!-- ARTEMIS-IGNIS-BRANDING:START -->
+<p align="center">
+  <img src="docs/assets/artemis-ignis-banner.png" alt="Artemis-Ignis banner" width="100%" />
+</p>
+
+<p align="center">
+  <img src="docs/assets/artemis-ignis-emblem.png" alt="Artemis-Ignis emblem" width="320" />
+</p>
+<!-- ARTEMIS-IGNIS-BRANDING:END -->
 
 **Enterprise-grade AI Agent Orchestration Framework**
 
@@ -206,3 +216,4 @@ Enterprise License — see [LICENSE](LICENSE) for details.
 # 2026-03-18T16:14:42 update
 
 # 2026-03-21T09:59:35 update
+
