@@ -6,10 +6,9 @@
 
 <!-- ARTEMIS-IGNIS-BADGE-BAR:START -->
 <p align="center">
-  <img alt="License" src="https://img.shields.io/github/license/Artemis-ignis/AgentOrchestration?style=for-the-badge&label=License&color=111111" />
-  <img alt="Last commit" src="https://img.shields.io/github/last-commit/Artemis-ignis/AgentOrchestration?style=for-the-badge&label=Last%20Commit&color=111111" />
-  <img alt="Stars" src="https://img.shields.io/github/stars/Artemis-ignis/AgentOrchestration?style=for-the-badge&label=Stars&color=111111" />
-  <img alt="Forks" src="https://img.shields.io/github/forks/Artemis-ignis/AgentOrchestration?style=for-the-badge&label=Forks&color=111111" />
+  <img alt="Artemis-Ignis project" src="https://img.shields.io/badge/Artemis--Ignis-Project-111111?style=for-the-badge" />
+  <img alt="Local-first workspace" src="https://img.shields.io/badge/Local--First-Workspace-d20b18?style=for-the-badge" />
+  <img alt="README verified" src="https://img.shields.io/badge/README-Verified-059669?style=for-the-badge" />
 </p>
 <!-- ARTEMIS-IGNIS-BADGE-BAR:END -->
 <p align="center"><a href="README.ko.md">한국어</a></p>
