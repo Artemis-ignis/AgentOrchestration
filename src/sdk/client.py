@@ -77,10 +77,16 @@ class OrchestratorClient:
     def get_task(self, task_id: str) -> Dict:
         return self._request("GET", f"/tasks/{task_id}")
 
+    def list_tasks(self, limit: int = 50) -> Dict:
+        return self._request("GET", "/tasks", params={"limit": limit})
+
     # -- Platform ----------------------------------------------------------
 
     def get_metrics(self) -> Dict:
         return self._request("GET", "/metrics")
+
+    def get_stats(self) -> Dict:
+        return self._request("GET", "/stats")
 
     def health(self) -> Dict:
         try:

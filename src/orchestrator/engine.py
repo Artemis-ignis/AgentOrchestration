@@ -71,6 +71,28 @@ class OrchestrationEngine:
     def get_task(self, task_id: str) -> Optional[Dict[str, Any]]:
         return self._tasks.get(task_id)
 
+    def list_tasks(self, limit: int = 50) -> List[Dict[str, Any]]:
+        """Most recently submitted tasks first."""
+        tasks = sorted(self._tasks.values(), key=lambda t: t.get("submitted_at", 0), reverse=True)
+        return tasks[:limit]
+
+    def stats(self) -> Dict[str, Any]:
+        agents_by_status: Dict[str, int] = {}
+        for agent in self.registry.list():
+            agents_by_status[agent["status"]] = agents_by_status.get(agent["status"], 0) + 1
+        tasks_by_status: Dict[str, int] = {}
+        for task in self._tasks.values():
+            tasks_by_status[task["status"]] = tasks_by_status.get(task["status"], 0) + 1
+        return {
+            "agents": {"total": self.registry.count(), "by_status": agents_by_status},
+            "tasks": {"total": len(self._tasks), "by_status": tasks_by_status},
+            "queue": {
+                "pending": self.scheduler.pending_count(),
+                "in_flight": self.scheduler.in_flight_count(),
+            },
+            "engine_running": self._running,
+        }
+
     @property
     def is_running(self) -> bool:
         return self._running

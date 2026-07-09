@@ -83,6 +83,34 @@ class TestAgentRoutes:
         assert resp.status_code == 200
         assert "counters" in resp.json()
 
+    def test_list_tasks(self):
+        agent_id = self._register()
+        self.client.post("/api/v2/tasks", json={"target_agent": agent_id})
+        resp = self.client.get("/api/v2/tasks")
+        assert resp.status_code == 200
+        tasks = resp.json()["tasks"]
+        assert len(tasks) == 1
+        assert tasks[0]["target_agent"] == agent_id
+
+    def test_stats_endpoint(self):
+        agent_id = self._register()
+        self.client.post("/api/v2/tasks", json={"target_agent": agent_id})
+        resp = self.client.get("/api/v2/stats")
+        assert resp.status_code == 200
+        stats = resp.json()
+        assert stats["agents"]["total"] == 1
+        assert stats["tasks"]["total"] == 1
+        assert stats["engine_running"] is True
+
+    def test_dashboard_served(self):
+        resp = self.client.get("/")
+        assert resp.status_code == 200
+        assert "text/html" in resp.headers["content-type"]
+        assert "Agent Orchestration" in resp.text
+        # dashboard is public chrome; data endpoints stay behind auth
+        with make_client(api_key="sekrit") as authed:
+            assert authed.get("/dashboard").status_code == 200
+
 
 class TestAuth:
     def test_auth_disabled_without_key(self):

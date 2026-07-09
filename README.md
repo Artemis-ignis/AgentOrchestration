@@ -18,6 +18,15 @@
 
 A distributed platform for orchestrating autonomous AI agents in enterprise environments. Provides agent lifecycle management, inter-agent communication, task scheduling, and verifiable execution.
 
+## Dashboard
+
+The built-in dashboard is served at `/` — live agent status, task queue, and platform metrics, refreshed every 2 seconds. Light and dark themes follow your system.
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/assets/dashboard-dark.png">
+  <img src="docs/assets/dashboard-light.png" alt="Agent Orchestration dashboard showing stat tiles, task status bar, agents table, and recent tasks" width="920">
+</picture>
+
 ## Architecture
 
 ```
@@ -99,8 +108,12 @@ Interactive docs are served at `/api/docs`. Core endpoints under `/api/v2`:
 | `POST`   | `/agents/{id}/stop`   | Stop an agent                        |
 | `DELETE` | `/agents/{id}`        | Remove an agent                      |
 | `POST`   | `/tasks`              | Submit a task to an agent            |
+| `GET`    | `/tasks`              | Recent tasks (newest first)          |
 | `GET`    | `/tasks/{id}`         | Task status and result               |
+| `GET`    | `/stats`              | Agent/task/queue aggregates          |
 | `GET`    | `/metrics`            | Platform metrics snapshot            |
+
+The dashboard itself is served at `/` (no auth required — data endpoints stay behind the API key when one is configured).
 
 ## Project Layout
 

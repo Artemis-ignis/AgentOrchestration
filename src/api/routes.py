@@ -95,12 +95,22 @@ async def submit_task(request: Request, body: TaskSubmit):
     return {"task_id": task_id, "status": "queued"}
 
 
+@router.get("/tasks")
+async def list_tasks(request: Request, limit: int = 50):
+    return {"tasks": _engine(request).list_tasks(limit=max(1, min(limit, 500)))}
+
+
 @router.get("/tasks/{task_id}")
 async def get_task(request: Request, task_id: str):
     task = _engine(request).get_task(task_id)
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
     return task
+
+
+@router.get("/stats")
+async def get_stats(request: Request):
+    return _engine(request).stats()
 
 
 @router.get("/metrics")
