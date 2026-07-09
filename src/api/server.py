@@ -1,36 +1,58 @@
 """FastAPI application server."""
 
+import asyncio
+import contextlib
 import os
-from typing import Dict
+from contextlib import asynccontextmanager
+from typing import Dict, Optional
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.middleware.trustedhost import TrustedHostMiddleware
 
-from .routes import router
+from src import __version__
+from src.orchestrator import OrchestrationEngine
+
 from .middleware import AuthMiddleware, RateLimitMiddleware, LoggingMiddleware
+from .routes import router
 
 
-def create_app(config: Dict = None) -> FastAPI:
+def create_app(config: Optional[Dict] = None) -> FastAPI:
+    config = config or {}
+    engine = OrchestrationEngine(
+        max_workers=config.get("max_workers", 10),
+        agent_timeout=config.get("agent_timeout", 300),
+    )
+
+    @asynccontextmanager
+    async def lifespan(app: FastAPI):
+        engine_task = asyncio.create_task(engine.start())
+        yield
+        engine.stop()
+        with contextlib.suppress(asyncio.TimeoutError, asyncio.CancelledError):
+            await asyncio.wait_for(engine_task, timeout=2)
+
     app = FastAPI(
         title="Agent Orchestrator API",
-        version="2.4.1",
+        version=__version__,
         description="Enterprise Agent Orchestration Platform API",
         docs_url="/api/docs",
         redoc_url="/api/redoc",
+        lifespan=lifespan,
     )
+    app.state.engine = engine
 
+    origins = [o.strip() for o in os.getenv("CORS_ORIGINS", "*").split(",") if o.strip()]
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=os.getenv("CORS_ORIGINS", "*").split(","),
-        allow_credentials=True,
+        allow_origins=origins,
+        # Browsers reject credentialed requests with a wildcard origin,
+        # so only allow credentials when explicit origins are configured.
+        allow_credentials="*" not in origins,
         allow_methods=["*"],
         allow_headers=["*"],
     )
 
-    app.add_middleware(TrustedHostMiddleware, allowed_hosts=os.getenv("TRUSTED_HOSTS", "*").split(","))
-
-    app.add_middleware(AuthMiddleware)
+    app.add_middleware(AuthMiddleware, api_key=config.get("api_key"))
     app.add_middleware(RateLimitMiddleware)
     app.add_middleware(LoggingMiddleware)
 
@@ -38,6 +60,11 @@ def create_app(config: Dict = None) -> FastAPI:
 
     @app.get("/health")
     async def health():
-        return {"status": "healthy", "version": "2.4.1"}
+        return {
+            "status": "healthy",
+            "version": __version__,
+            "engine_running": engine.is_running,
+            "agents": engine.registry.count(),
+        }
 
     return app

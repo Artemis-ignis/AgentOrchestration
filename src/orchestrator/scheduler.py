@@ -2,7 +2,7 @@
 
 import heapq
 import time
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, Tuple
 from uuid import uuid4
 
 
@@ -30,17 +30,20 @@ class PriorityQueue:
 
 
 class TaskScheduler:
-    def __init__(self):
+    def __init__(self, max_retries: int = 3):
         self._queues: Dict[str, PriorityQueue] = {}
-        self._scheduled: Dict[str, float] = {}
+        # task_id -> (due_at, task, queue, priority)
+        self._scheduled: Dict[str, Tuple[float, Dict, str, int]] = {}
         self._in_flight: Dict[str, Dict] = {}
-        self._max_retries = 3
+        self._max_retries = max_retries
 
     def enqueue(self, task: Dict, queue: str = "default", priority: int = 0) -> str:
-        task_id = str(uuid4())
+        task_id = task.get("id") or str(uuid4())
         task["id"] = task_id
-        task["enqueued_at"] = time.time()
-        task["retries"] = 0
+        task["queue"] = queue
+        task["priority"] = priority
+        task.setdefault("enqueued_at", time.time())
+        task.setdefault("retries", 0)
 
         if queue not in self._queues:
             self._queues[queue] = PriorityQueue()
@@ -48,21 +51,23 @@ class TaskScheduler:
         return task_id
 
     def schedule(self, task: Dict, delay: float, queue: str = "default", priority: int = 0) -> str:
-        task_id = str(uuid4())
+        task_id = task.get("id") or str(uuid4())
         task["id"] = task_id
-        self._scheduled[task_id] = time.time() + delay
+        self._scheduled[task_id] = (time.time() + delay, task, queue, priority)
         return task_id
 
-    async def dequeue(self, queue: str = "default", timeout: float = 1.0) -> Optional[Dict]:
+    def _promote_due_tasks(self) -> None:
         now = time.time()
-        expired = [tid for tid, t in self._scheduled.items() if t <= now]
-        for tid in expired:
-            task = self._scheduled.pop(tid)
-            if task:
-                self.enqueue(task, queue)
+        due = [tid for tid, (due_at, _, _, _) in self._scheduled.items() if due_at <= now]
+        for tid in due:
+            _, task, queue, priority = self._scheduled.pop(tid)
+            self.enqueue(task, queue, priority)
 
-        if queue in self._queues and len(self._queues[queue]) > 0:
-            task = self._queues[queue].pop()
+    async def dequeue(self, queue: str = "default") -> Optional[Dict]:
+        self._promote_due_tasks()
+        q = self._queues.get(queue)
+        if q and len(q) > 0:
+            task = q.pop()
             if task:
                 self._in_flight[task["id"]] = task
                 return task
@@ -71,11 +76,21 @@ class TaskScheduler:
     def complete(self, task_id: str) -> bool:
         return self._in_flight.pop(task_id, None) is not None
 
-    def fail(self, task_id: str, queue: str = "default") -> bool:
+    def fail(self, task_id: str) -> bool:
+        """Mark an in-flight task as failed. Re-enqueues it for retry and
+        returns True while retries remain; returns False once exhausted."""
         task = self._in_flight.pop(task_id, None)
-        if task:
-            task["retries"] += 1
-            if task["retries"] < self._max_retries:
-                self.enqueue(task, queue, priority=task.get("priority", 0))
-                return True
+        if not task:
+            return False
+        task["retries"] = task.get("retries", 0) + 1
+        if task["retries"] <= self._max_retries:
+            self.enqueue(task, task.get("queue", "default"), task.get("priority", 0))
+            return True
         return False
+
+    def pending_count(self, queue: str = "default") -> int:
+        q = self._queues.get(queue)
+        return len(q) if q else 0
+
+    def in_flight_count(self) -> int:
+        return len(self._in_flight)

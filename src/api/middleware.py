@@ -1,21 +1,38 @@
 """API middleware components."""
 
-import time
+import hmac
 import logging
-from typing import Callable
+import os
+import time
+from typing import Callable, Optional
+
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
-from starlette.responses import Response
+from starlette.responses import JSONResponse, Response
+
+from src.common.metrics import metrics
 
 logger = logging.getLogger(__name__)
 
 
 class AuthMiddleware(BaseHTTPMiddleware):
+    """Bearer-token auth for the API.
+
+    The expected token comes from the `api_key` argument or the AO_API_KEY
+    environment variable. When no key is configured, auth is disabled
+    (local development mode).
+    """
+
+    def __init__(self, app, api_key: Optional[str] = None):
+        super().__init__(app)
+        self.api_key = api_key if api_key is not None else os.getenv("AO_API_KEY", "")
+
     async def dispatch(self, request: Request, call_next: Callable) -> Response:
-        if request.url.path.startswith("/api/v2") and request.url.path != "/api/v2/auth/token":
-            token = request.headers.get("Authorization", "")
-            if not token.startswith("Bearer "):
-                return Response(status_code=401, content="Unauthorized")
+        if self.api_key and request.url.path.startswith("/api/v2"):
+            auth = request.headers.get("Authorization", "")
+            expected = f"Bearer {self.api_key}"
+            if not hmac.compare_digest(auth, expected):
+                return JSONResponse(status_code=401, content={"detail": "Unauthorized"})
         return await call_next(request)
 
 
@@ -30,15 +47,13 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         client_ip = request.client.host if request.client else "unknown"
         now = time.time()
 
-        if client_ip not in self._requests:
-            self._requests[client_ip] = []
+        timestamps = [t for t in self._requests.get(client_ip, []) if now - t < self.window]
 
-        self._requests[client_ip] = [t for t in self._requests[client_ip] if now - t < self.window]
+        if len(timestamps) >= self.max_requests:
+            return JSONResponse(status_code=429, content={"detail": "Too many requests"})
 
-        if len(self._requests[client_ip]) >= self.max_requests:
-            return Response(status_code=429, content="Too many requests")
-
-        self._requests[client_ip].append(now)
+        timestamps.append(now)
+        self._requests[client_ip] = timestamps
         return await call_next(request)
 
 
@@ -47,5 +62,8 @@ class LoggingMiddleware(BaseHTTPMiddleware):
         start = time.time()
         response = await call_next(request)
         duration = time.time() - start
+        metrics.increment("http.requests.total")
+        metrics.increment(f"http.responses.{response.status_code}")
+        metrics.observe("http.request.duration", duration)
         logger.info(f"{request.method} {request.url.path} {response.status_code} {duration:.3f}s")
         return response

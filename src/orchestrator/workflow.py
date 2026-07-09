@@ -69,15 +69,19 @@ class WorkflowManager:
         workflow.status = StepStatus.RUNNING
         for step in workflow.steps:
             step.status = StepStatus.RUNNING
-            try:
-                result = step.handler()
-                step.result = result
-                step.status = StepStatus.COMPLETED
-            except Exception as e:
-                step.error = str(e)
-                step.status = StepStatus.FAILED
-                workflow.status = StepStatus.FAILED
-                return False
+            attempts = step.retries + 1
+            for attempt in range(1, attempts + 1):
+                try:
+                    step.result = step.handler()
+                    step.error = None
+                    step.status = StepStatus.COMPLETED
+                    break
+                except Exception as e:
+                    step.error = str(e)
+                    if attempt >= attempts:
+                        step.status = StepStatus.FAILED
+                        workflow.status = StepStatus.FAILED
+                        return False
 
         workflow.status = StepStatus.COMPLETED
         return True

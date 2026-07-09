@@ -55,24 +55,52 @@ make install
 # Run the test suite
 make test
 
-# Start the API server (http://localhost:8000)
-make run
+# Start the API server (http://127.0.0.1:8000)
+uv run ao serve
 ```
 
 ### CLI
 
-The `ao` command is available after installation:
+The `ao` command drives the platform end to end:
 
 ```bash
-# Initialize a project
+# Initialize a project (creates an example agent manifest)
 uv run ao init my-agents
 
-# Deploy an agent from a manifest
-uv run ao deploy path/to/agent.yaml
+# Deploy the agent from its manifest
+uv run ao deploy my-agents/agents/hello-agent.yaml
 
-# View agent status
-uv run ao status --watch
+# View agent status (--watch refreshes every 2s)
+uv run ao status
+
+# Submit a task and wait for the result
+uv run ao submit <agent-id> --payload '{"question": "hello"}'
+
+# Inspect a single agent or task
+uv run ao info <agent-id>
+uv run ao task <task-id>
 ```
+
+Point the CLI at a remote orchestrator with `--api-url` (or `$AO_API_URL`), and
+authenticate with `--api-key` (or `$AO_API_KEY`). The server requires a Bearer
+token only when started with `AO_API_KEY` set — with no key configured, auth is
+disabled for local development.
+
+### REST API
+
+Interactive docs are served at `/api/docs`. Core endpoints under `/api/v2`:
+
+| Method   | Path                  | Description                          |
+| -------- | --------------------- | ------------------------------------ |
+| `POST`   | `/agents`             | Register an agent                    |
+| `GET`    | `/agents`             | List agents (filter: status, group)  |
+| `GET`    | `/agents/{id}`        | Agent details                        |
+| `POST`   | `/agents/{id}/start`  | Start an agent                       |
+| `POST`   | `/agents/{id}/stop`   | Stop an agent                        |
+| `DELETE` | `/agents/{id}`        | Remove an agent                      |
+| `POST`   | `/tasks`              | Submit a task to an agent            |
+| `GET`    | `/tasks/{id}`         | Task status and result               |
+| `GET`    | `/metrics`            | Platform metrics snapshot            |
 
 ## Project Layout
 

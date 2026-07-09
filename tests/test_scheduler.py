@@ -34,3 +34,34 @@ class TestTaskScheduler:
         import asyncio
         task = asyncio.run(self.scheduler.dequeue())
         assert self.scheduler.fail(task["id"])
+
+    def test_retry_preserves_id_and_priority(self):
+        import asyncio
+        task_id = self.scheduler.enqueue({"type": "test"}, priority=7)
+        task = asyncio.run(self.scheduler.dequeue())
+        self.scheduler.fail(task["id"])
+        retried = asyncio.run(self.scheduler.dequeue())
+        assert retried["id"] == task_id
+        assert retried["priority"] == 7
+        assert retried["retries"] == 1
+
+    def test_retries_exhaust(self):
+        import asyncio
+        scheduler = TaskScheduler(max_retries=1)
+        scheduler.enqueue({"type": "test"})
+        task = asyncio.run(scheduler.dequeue())
+        assert scheduler.fail(task["id"])  # retry 1 allowed
+        task = asyncio.run(scheduler.dequeue())
+        assert not scheduler.fail(task["id"])  # exhausted
+        assert asyncio.run(scheduler.dequeue()) is None
+
+    def test_schedule_delivers_task_after_delay(self):
+        import asyncio
+        import time
+        task_id = self.scheduler.schedule({"type": "delayed"}, delay=0.05)
+        assert asyncio.run(self.scheduler.dequeue()) is None
+        time.sleep(0.06)
+        task = asyncio.run(self.scheduler.dequeue())
+        assert task is not None
+        assert task["id"] == task_id
+        assert task["type"] == "delayed"
