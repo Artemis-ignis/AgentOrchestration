@@ -1,0 +1,373 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Agent Orchestration — Dashboard</title>
+<style>
+  :root {
+    --page:           #f9f9f7;
+    --surface:        #fcfcfb;
+    --ink:            #0b0b0b;
+    --ink-2:          #52514e;
+    --muted:          #898781;
+    --grid:           #e1e0d9;
+    --border:         rgba(11,11,11,0.10);
+    --series-1:       #2a78d6;
+    --status-good:    #0ca30c;
+    --status-warn:    #fab219;
+    --status-serious: #ec835a;
+    --status-crit:    #d03b3b;
+    --good-text:      #006300;
+    --crit-text:      #a32f2f;
+    --warn-text:      #8a5b00;
+    --serious-text:   #9c4a24;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --page:           #0d0d0d;
+      --surface:        #1a1a19;
+      --ink:            #ffffff;
+      --ink-2:          #c3c2b7;
+      --muted:          #898781;
+      --grid:           #2c2c2a;
+      --border:         rgba(255,255,255,0.10);
+      --series-1:       #3987e5;
+      --good-text:      #0ca30c;
+      --crit-text:      #e66767;
+      --warn-text:      #fab219;
+      --serious-text:   #ec835a;
+    }
+  }
+
+  * { box-sizing: border-box; margin: 0; }
+  html, body { height: 100%; }
+  body {
+    background: var(--page);
+    color: var(--ink);
+    font: 14px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+  .wrap { max-width: 1080px; margin: 0 auto; padding: 28px 20px 48px; }
+
+  /* ---------- header ---------- */
+  header { display: flex; align-items: baseline; gap: 14px; flex-wrap: wrap; margin-bottom: 22px; }
+  header h1 { font-size: 19px; font-weight: 650; letter-spacing: -0.01em; }
+  header .sub { color: var(--muted); font-size: 13px; }
+  header .right { margin-left: auto; display: flex; align-items: center; gap: 14px; }
+  .engine-pill { display: inline-flex; align-items: center; gap: 7px; font-size: 13px; color: var(--ink-2); }
+  .engine-pill .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); }
+  .engine-pill.on  .dot { background: var(--status-good); }
+  .engine-pill.off .dot { background: var(--status-crit); }
+  .version { color: var(--muted); font-size: 12px; }
+
+  /* ---------- banner ---------- */
+  .banner {
+    display: none; align-items: center; gap: 10px; margin-bottom: 18px;
+    padding: 10px 14px; border: 1px solid var(--border); border-radius: 10px;
+    background: var(--surface); color: var(--ink-2); font-size: 13px;
+  }
+  .banner.show { display: flex; }
+  .banner input {
+    flex: 1; max-width: 280px; padding: 5px 9px; font: inherit;
+    color: var(--ink); background: var(--page);
+    border: 1px solid var(--grid); border-radius: 7px;
+  }
+  .banner button {
+    padding: 5px 13px; font: inherit; font-weight: 600; cursor: pointer;
+    color: var(--surface); background: var(--ink); border: 0; border-radius: 7px;
+  }
+
+  /* ---------- stat tiles ---------- */
+  .tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; margin-bottom: 22px; }
+  .tile {
+    background: var(--surface); border: 1px solid var(--border); border-radius: 12px;
+    padding: 14px 16px 12px; min-height: 86px;
+    display: flex; flex-direction: column; gap: 2px;
+  }
+  .tile .label { font-size: 12.5px; color: var(--ink-2); }
+  .tile .value { font-size: 27px; font-weight: 650; letter-spacing: -0.01em; }
+  .tile .value.good { color: var(--good-text); }
+  .tile .value.crit { color: var(--crit-text); }
+  .tile .spark { margin-top: auto; height: 22px; }
+  .tile .spark polyline { fill: none; stroke: var(--grid); stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; }
+  .tile .spark .accent { stroke: var(--series-1); }
+  .tile .spark circle { fill: var(--series-1); stroke: var(--surface); stroke-width: 2; }
+
+  /* ---------- cards ---------- */
+  .card {
+    background: var(--surface); border: 1px solid var(--border); border-radius: 12px;
+    padding: 16px 18px; margin-bottom: 18px;
+  }
+  .card h2 { font-size: 13.5px; font-weight: 650; color: var(--ink-2); margin-bottom: 12px; }
+  .card h2 .count { color: var(--muted); font-weight: 500; }
+
+  /* ---------- task status bar ---------- */
+  .statusbar { display: flex; height: 18px; border-radius: 5px; overflow: hidden; background: var(--page); }
+  .statusbar .seg { min-width: 3px; }
+  .statusbar .seg + .seg { margin-left: 2px; } /* surface gap between touching fills */
+  .statusbar .seg:first-child { border-radius: 5px 0 0 5px; }
+  .statusbar .seg:last-child  { border-radius: 0 5px 5px 0; }
+  .legend { display: flex; flex-wrap: wrap; gap: 5px 18px; margin-top: 10px; font-size: 12.5px; color: var(--ink-2); }
+  .legend .key { display: inline-flex; align-items: center; gap: 6px; }
+  .legend .swatch { width: 9px; height: 9px; border-radius: 3px; }
+  .legend .n { color: var(--ink); font-weight: 600; }
+
+  /* ---------- tables ---------- */
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th {
+    text-align: left; font-size: 11.5px; font-weight: 600; letter-spacing: 0.04em;
+    text-transform: uppercase; color: var(--muted);
+    padding: 0 10px 8px; border-bottom: 1px solid var(--grid);
+  }
+  td { padding: 9px 10px; border-bottom: 1px solid var(--grid); color: var(--ink); vertical-align: middle; }
+  tr:last-child td { border-bottom: 0; }
+  tr:hover td { background: color-mix(in srgb, var(--grid) 30%, transparent); }
+  td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
+  td.mono { font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; font-size: 12px; color: var(--ink-2); }
+  td .sub { color: var(--muted); font-size: 12px; }
+  .empty { color: var(--muted); padding: 22px 0; text-align: center; font-size: 13px; }
+
+  /* ---------- status pills ---------- */
+  .pill {
+    display: inline-flex; align-items: center; gap: 6px;
+    padding: 2px 9px 2px 7px; border-radius: 999px; font-size: 12px; font-weight: 550;
+    border: 1px solid var(--border); color: var(--ink-2); white-space: nowrap;
+  }
+  /* one meaning per color: blue = active, green = success,
+     amber = waiting/retrying, red = failure, gray = idle */
+  .pill .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--muted); }
+  .pill.running   .dot { background: var(--series-1); }
+  .pill.completed .dot { background: var(--status-good); }
+  .pill.completed      { color: var(--good-text); }
+  .pill.paused    .dot, .pill.retrying .dot { background: var(--status-warn); }
+  .pill.paused,   .pill.retrying   { color: var(--warn-text); }
+  .pill.failed    .dot { background: var(--status-crit); }
+  .pill.failed    { color: var(--crit-text); }
+  .pill.terminated .dot { background: var(--status-serious); }
+  .pill.terminated { color: var(--serious-text); }
+
+  footer { color: var(--muted); font-size: 12px; text-align: center; margin-top: 26px; }
+  footer a { color: inherit; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>Agent Orchestration</h1>
+    <span class="sub">platform dashboard</span>
+    <div class="right">
+      <span class="engine-pill" id="engine"><span class="dot"></span><span id="engine-label">connecting…</span></span>
+      <span class="version" id="version"></span>
+    </div>
+  </header>
+
+  <div class="banner" id="auth-banner">
+    <span>This orchestrator requires an API key.</span>
+    <input id="key-input" type="password" placeholder="AO_API_KEY" autocomplete="off">
+    <button id="key-save">Connect</button>
+  </div>
+
+  <div class="tiles">
+    <div class="tile"><div class="label">Agents</div><div class="value" id="t-agents">–</div></div>
+    <div class="tile"><div class="label">Queue depth</div><div class="value" id="t-queue">–</div></div>
+    <div class="tile"><div class="label">In flight</div><div class="value" id="t-flight">–</div></div>
+    <div class="tile">
+      <div class="label">Tasks completed</div><div class="value good" id="t-done">–</div>
+      <svg class="spark" id="spark" viewBox="0 0 100 22" preserveAspectRatio="none" aria-hidden="true"></svg>
+    </div>
+    <div class="tile"><div class="label">Tasks failed</div><div class="value" id="t-failed">–</div></div>
+  </div>
+
+  <div class="card">
+    <h2>Tasks by status</h2>
+    <div class="statusbar" id="statusbar"></div>
+    <div class="legend" id="status-legend"></div>
+  </div>
+
+  <div class="card">
+    <h2>Agents <span class="count" id="agents-count"></span></h2>
+    <div id="agents-body"></div>
+  </div>
+
+  <div class="card">
+    <h2>Recent tasks <span class="count" id="tasks-count"></span></h2>
+    <div id="tasks-body"></div>
+  </div>
+
+  <footer>refreshes every 2s · <a href="/api/docs">API docs</a></footer>
+</div>
+
+<script>
+(() => {
+  "use strict";
+
+  const $ = (id) => document.getElementById(id);
+  const esc = (s) => String(s).replace(/[&<>"']/g, (c) =>
+    ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+
+  // Order and colors for the task status bar. Statuses use the reserved
+  // status palette (never categorical slots); queued rides the series hue.
+  const TASK_STATES = [
+    {key: "queued",    color: "var(--muted)"},
+    {key: "running",   color: "var(--series-1)"},
+    {key: "retrying",  color: "var(--status-warn)"},
+    {key: "completed", color: "var(--status-good)"},
+    {key: "failed",    color: "var(--status-crit)"},
+  ];
+
+  let apiKey = localStorage.getItem("ao_api_key") || "";
+  const headers = () => apiKey ? {"Authorization": "Bearer " + apiKey} : {};
+
+  $("key-save").addEventListener("click", () => {
+    apiKey = $("key-input").value.trim();
+    localStorage.setItem("ao_api_key", apiKey);
+    $("auth-banner").classList.remove("show");
+    tick();
+  });
+
+  async function api(path) {
+    const resp = await fetch(path, {headers: headers()});
+    if (resp.status === 401) { $("auth-banner").classList.add("show"); throw new Error("unauthorized"); }
+    if (!resp.ok) throw new Error("HTTP " + resp.status);
+    return resp.json();
+  }
+
+  function pill(status) {
+    return `<span class="pill ${esc(status)}"><span class="dot"></span>${esc(status)}</span>`;
+  }
+
+  function relTime(ts) {
+    if (!ts) return "–";
+    const s = Math.max(0, (Date.now() / 1000) - ts);
+    if (s < 60) return Math.floor(s) + "s ago";
+    if (s < 3600) return Math.floor(s / 60) + "m ago";
+    if (s < 86400) return Math.floor(s / 3600) + "h ago";
+    return Math.floor(s / 86400) + "d ago";
+  }
+
+  // ---- stat tiles + sparkline (client-side history of completed count) ----
+  const history = [];
+  function renderSpark(completed) {
+    history.push(completed);
+    if (history.length > 20) history.shift();
+    if (history.length < 2) return;
+    const min = Math.min(...history), max = Math.max(...history);
+    const span = (max - min) || 1;
+    const pts = history.map((v, i) => {
+      const x = (i / (history.length - 1)) * 96 + 2;
+      const y = 19 - ((v - min) / span) * 16;
+      return [x.toFixed(1), y.toFixed(1)];
+    });
+    const line = pts.map(p => p.join(",")).join(" ");
+    const [ex, ey] = pts[pts.length - 1];
+    $("spark").innerHTML =
+      `<polyline class="accent" points="${line}"></polyline>` +
+      `<circle cx="${ex}" cy="${ey}" r="3"></circle>`;
+  }
+
+  function renderStats(stats) {
+    const t = stats.tasks.by_status || {};
+    $("t-agents").textContent = stats.agents.total;
+    $("t-queue").textContent = stats.queue.pending;
+    $("t-flight").textContent = stats.queue.in_flight;
+    $("t-done").textContent = t.completed || 0;
+    $("t-failed").textContent = t.failed || 0;
+    $("t-failed").classList.toggle("crit", (t.failed || 0) > 0);
+    renderSpark(t.completed || 0);
+
+    const engine = $("engine");
+    engine.classList.toggle("on", !!stats.engine_running);
+    engine.classList.toggle("off", !stats.engine_running);
+    $("engine-label").textContent = stats.engine_running ? "engine running" : "engine stopped";
+
+    // status bar + legend
+    const total = TASK_STATES.reduce((n, s) => n + (t[s.key] || 0), 0);
+    const bar = $("statusbar"), legend = $("status-legend");
+    if (!total) {
+      bar.innerHTML = `<div class="seg" style="flex:1;background:var(--grid)"></div>`;
+      legend.innerHTML = `<span class="key" style="color:var(--muted)">no tasks yet</span>`;
+      return;
+    }
+    bar.innerHTML = TASK_STATES.filter(s => t[s.key])
+      .map(s => `<div class="seg" style="flex:${t[s.key]};background:${s.color}" title="${s.key}: ${t[s.key]}"></div>`)
+      .join("");
+    legend.innerHTML = TASK_STATES
+      .map(s => `<span class="key"><span class="swatch" style="background:${s.color}"></span>${s.key} <span class="n">${t[s.key] || 0}</span></span>`)
+      .join("");
+  }
+
+  function renderAgents(agents) {
+    $("agents-count").textContent = agents.length ? `(${agents.length})` : "";
+    if (!agents.length) {
+      $("agents-body").innerHTML = `<div class="empty">No agents registered — deploy one with <code>ao deploy</code></div>`;
+      return;
+    }
+    const rows = agents.map(a => `
+      <tr>
+        <td><strong>${esc(a.name)}</strong><br><span class="sub">${esc(a.type)}</span></td>
+        <td class="mono">${esc(a.id.slice(0, 8))}</td>
+        <td>${pill(a.status)}</td>
+        <td class="num">${a.metrics.tasks_completed}</td>
+        <td class="num">${a.metrics.errors}</td>
+        <td class="num"><span class="sub">${relTime(a.updated_at)}</span></td>
+      </tr>`).join("");
+    $("agents-body").innerHTML =
+      `<table><thead><tr><th>Agent</th><th>ID</th><th>Status</th>
+       <th class="num">Tasks</th><th class="num">Errors</th><th class="num">Updated</th></tr></thead>
+       <tbody>${rows}</tbody></table>`;
+  }
+
+  function renderTasks(tasks) {
+    $("tasks-count").textContent = tasks.length ? `(${tasks.length})` : "";
+    if (!tasks.length) {
+      $("tasks-body").innerHTML = `<div class="empty">No tasks yet — submit one with <code>ao submit</code></div>`;
+      return;
+    }
+    const rows = tasks.slice(0, 15).map(t => {
+      const dur = t.completed_at ? ((t.completed_at - t.submitted_at)).toFixed(2) + "s" : "–";
+      const raw = t.error ? String(t.error) : JSON.stringify(t.payload || {});
+      const short = raw.length > 48 ? raw.slice(0, 48) + "…" : raw;
+      return `
+      <tr>
+        <td class="mono">${esc(t.id.slice(0, 8))}</td>
+        <td class="mono">${esc((t.target_agent || "").slice(0, 8))}</td>
+        <td>${pill(t.status)}</td>
+        <td><span class="sub" title="${esc(raw)}">${esc(short)}</span></td>
+        <td class="num">${dur}</td>
+        <td class="num"><span class="sub">${relTime(t.submitted_at)}</span></td>
+      </tr>`;
+    }).join("");
+    $("tasks-body").innerHTML =
+      `<table><thead><tr><th>Task</th><th>Agent</th><th>Status</th><th>Payload / error</th>
+       <th class="num">Duration</th><th class="num">Submitted</th></tr></thead>
+       <tbody>${rows}</tbody></table>`;
+  }
+
+  async function tick() {
+    try {
+      const [health, stats, agents, tasks] = await Promise.all([
+        fetch("/health").then(r => r.json()),
+        api("/api/v2/stats"),
+        api("/api/v2/agents"),
+        api("/api/v2/tasks?limit=15"),
+      ]);
+      $("version").textContent = "v" + health.version;
+      renderStats(stats);
+      renderAgents(agents.agents);
+      renderTasks(tasks.tasks);
+    } catch (e) {
+      if (e.message !== "unauthorized") {
+        $("engine").classList.remove("on");
+        $("engine").classList.add("off");
+        $("engine-label").textContent = "unreachable";
+      }
+    }
+  }
+
+  tick();
+  setInterval(() => { if (!document.hidden) tick(); }, 2000);
+})();
+</script>
+</body>
+</html>
