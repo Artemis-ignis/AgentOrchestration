@@ -20,12 +20,18 @@ A distributed platform for orchestrating autonomous AI agents in enterprise envi
 
 ## Dashboard
 
-The built-in dashboard is served at `/` — live agent status, task queue, and platform metrics, refreshed every 2 seconds. Light and dark themes follow your system.
+The built-in dashboard is served at `/` — live agent status, throughput, task queue, and platform metrics, refreshed every 2 seconds. Agents can be started and stopped from the table, and clicking a task opens its full payload, result, and timing. Light and dark themes follow your system.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/assets/dashboard-dark.png">
-  <img src="docs/assets/dashboard-light.png" alt="Agent Orchestration dashboard showing stat tiles, task status bar, agents table, and recent tasks" width="920">
+  <img src="docs/assets/dashboard-light.png" alt="Agent Orchestration dashboard showing stat tiles, throughput chart, agents table with start/stop controls, and recent tasks" width="920">
 </picture>
+
+<details>
+<summary><strong>▶ Watch the live demo</strong> (tasks streaming in, agent controls, task detail modal)</summary>
+<br>
+<img src="docs/assets/dashboard-demo.gif" alt="Animated demo of the dashboard: stat tiles and throughput chart updating live, an agent being started, and a task detail modal opening" width="920">
+</details>
 
 ## Architecture
 
