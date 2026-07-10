@@ -3,12 +3,16 @@
 import asyncio
 import logging
 import os
+import shlex
+import tempfile
 import time
 from collections import deque
 from concurrent.futures import ThreadPoolExecutor
+from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
 
 from src.agent import AgentRegistry, AgentStatus
+from src.agent.runtime import AgentRuntime, RuntimeState
 from src.common.errors import AgentNotFoundError
 from src.common.store import SqliteStore
 from src.orchestrator.scheduler import TaskScheduler
@@ -31,6 +35,10 @@ class OrchestrationEngine:
         self.registry = registry or AgentRegistry(store=self.store)
         self.scheduler = scheduler or TaskScheduler()
         self.workflows = WorkflowManager()
+        self.runtime = AgentRuntime()
+        self._log_dir = Path(os.getenv("AO_LOG_DIR") or Path(tempfile.gettempdir()) / "ao-agent-logs")
+        self._log_dir.mkdir(parents=True, exist_ok=True)
+        self._last_reconcile = 0.0
         self.executor = ThreadPoolExecutor(max_workers=max_workers)
         self.agent_timeout = agent_timeout
         self._running = False
@@ -221,10 +229,73 @@ class OrchestrationEngine:
     def is_running(self) -> bool:
         return self._running
 
+    # -- agent process lifecycle ------------------------------------------
+
+    def _agent_command(self, agent: Dict[str, Any]) -> Optional[List[str]]:
+        command = (agent.get("config") or {}).get("command")
+        if not command:
+            return None
+        return shlex.split(command) if isinstance(command, str) else list(command)
+
+    def start_agent(self, agent_id: str) -> bool:
+        """Mark an agent running; if its config declares a `command`, launch
+        the process too. Returns False when the process fails to launch."""
+        agent = self.registry.get(agent_id)
+        if not agent:
+            raise AgentNotFoundError(agent_id)
+        command = self._agent_command(agent)
+        if command and not self.runtime.is_running(agent_id):
+            log_path = str(self._log_dir / f"{agent_id}.log")
+            if not self.runtime.start(agent_id, command, log_path=log_path):
+                self.registry.update_status(agent_id, AgentStatus.FAILED)
+                return False
+        self.registry.update_status(agent_id, AgentStatus.RUNNING)
+        return True
+
+    def stop_agent(self, agent_id: str) -> bool:
+        agent = self.registry.get(agent_id)
+        if not agent:
+            raise AgentNotFoundError(agent_id)
+        self.runtime.stop(agent_id)
+        self.registry.update_status(agent_id, AgentStatus.PAUSED)
+        return True
+
+    def runtime_info(self, agent_id: str) -> Optional[Dict[str, Any]]:
+        agent = self.registry.get(agent_id)
+        if not agent or not self._agent_command(agent):
+            return None
+        return {
+            "state": self.runtime.get_state(agent_id).value,
+            "pid": self.runtime.pid(agent_id),
+        }
+
+    def agent_log_tail(self, agent_id: str, lines: int = 50) -> Optional[str]:
+        log_path = self.runtime.log_path(agent_id) or str(self._log_dir / f"{agent_id}.log")
+        try:
+            with open(log_path, "rb") as f:
+                content = f.read().decode(errors="replace")
+        except OSError:
+            return None
+        return "\n".join(content.splitlines()[-lines:])
+
+    def reconcile_runtimes(self) -> None:
+        """Flag process-backed agents whose process died as failed."""
+        for agent in self.registry.list(status=AgentStatus.RUNNING):
+            if not self._agent_command(agent):
+                continue
+            if self.runtime.get_state(agent["id"]) == RuntimeState.CRASHED:
+                logger.warning(f"Agent {agent['id']} process crashed")
+                agent["metrics"]["errors"] += 1
+                self.registry.update_status(agent["id"], AgentStatus.FAILED)
+
     async def start(self) -> None:
         self._running = True
         logger.info("Orchestration engine started")
         while self._running:
+            now = time.time()
+            if now - self._last_reconcile >= 2.0:
+                self._last_reconcile = now
+                self.reconcile_runtimes()
             task = await self.scheduler.dequeue()
             if task:
                 asyncio.create_task(self._execute_task(task))

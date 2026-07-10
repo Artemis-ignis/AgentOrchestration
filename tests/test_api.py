@@ -102,6 +102,42 @@ class TestAgentRoutes:
         assert stats["tasks"]["total"] == 1
         assert stats["engine_running"] is True
 
+    def test_process_agent_lifecycle_via_api(self):
+        import sys
+        resp = self.client.post("/api/v2/agents", json={
+            "name": "proc-agent",
+            "agent_type": "proc.sleeper",
+            "config": {"command": [sys.executable, "-u", "-c",
+                                   "import time; print('agent up'); time.sleep(60)"]},
+        })
+        agent_id = resp.json()["agent_id"]
+
+        start = self.client.post(f"/api/v2/agents/{agent_id}/start")
+        assert start.status_code == 200
+        assert start.json()["runtime"]["state"] == "running"
+
+        detail = self.client.get(f"/api/v2/agents/{agent_id}").json()
+        assert detail["runtime"]["pid"]
+
+        import time
+        for _ in range(100):
+            log = self.client.get(f"/api/v2/agents/{agent_id}/logs").json()["log"]
+            if "agent up" in log:
+                break
+            time.sleep(0.05)
+        assert "agent up" in log
+
+        assert self.client.post(f"/api/v2/agents/{agent_id}/stop").status_code == 200
+
+    def test_process_agent_bad_command_returns_502(self):
+        resp = self.client.post("/api/v2/agents", json={
+            "name": "bad-proc",
+            "agent_type": "proc.bad",
+            "config": {"command": ["/nonexistent/binary-xyz"]},
+        })
+        agent_id = resp.json()["agent_id"]
+        assert self.client.post(f"/api/v2/agents/{agent_id}/start").status_code == 502
+
     def test_workflow_create_run_and_get(self):
         import time
         agent_id = self._register()

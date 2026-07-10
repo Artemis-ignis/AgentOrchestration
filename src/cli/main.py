@@ -19,6 +19,10 @@ name: hello-agent
 type: demo.hello
 config:
   greeting: "Hello from Agent Orchestration"
+  # Optional: launch the agent as a real process when it is started.
+  # The command runs relative to the orchestrator server's working directory;
+  # stdout/stderr are captured and available via `ao logs <agent-id>`.
+  # command: "python3 -u my_agent.py"
 """
 
 # ANSI styling — honors NO_COLOR (https://no-color.org) and non-TTY output.
@@ -177,6 +181,15 @@ def cmd_task(args) -> None:
     print(json.dumps(task, indent=2, default=str))
 
 
+def cmd_logs(args) -> None:
+    result = _check(_client(args).get_agent_logs(args.agent_id, tail=args.tail))
+    if result.get("log"):
+        print(result["log"])
+    else:
+        print("No process logs for this agent — it may not have a `command` configured "
+              "or has not been started yet.")
+
+
 def cli() -> None:
     parser = argparse.ArgumentParser(prog="ao", description="Agent Orchestrator CLI")
     parser.add_argument("--api-url", default=None,
@@ -221,6 +234,11 @@ def cli() -> None:
     task_parser = subparsers.add_parser("task", help="Show status/result of a task")
     task_parser.add_argument("task_id", help="Task ID")
     task_parser.set_defaults(func=cmd_task)
+
+    logs_parser = subparsers.add_parser("logs", help="Show an agent's process logs")
+    logs_parser.add_argument("agent_id", help="Agent ID")
+    logs_parser.add_argument("--tail", "-t", type=int, default=50, help="Number of lines")
+    logs_parser.set_defaults(func=cmd_logs)
 
     args = parser.parse_args()
     configure_logging("DEBUG" if args.verbose else "INFO", json_output=False)

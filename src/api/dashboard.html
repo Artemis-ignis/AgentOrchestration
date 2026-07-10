@@ -793,21 +793,31 @@
   backdrop.addEventListener("click", (ev) => { if (ev.target === backdrop) closeModal(); });
   document.addEventListener("keydown", (ev) => { if (ev.key === "Escape") closeModal(); });
 
-  function openAgent(agent) {
+  async function openAgent(summary) {
+    let agent = summary, log = "";
+    try {
+      [agent, {log}] = await Promise.all([
+        api(`/api/v2/agents/${summary.id}`),
+        api(`/api/v2/agents/${summary.id}/logs?tail=40`),
+      ]);
+    } catch (e) { /* fall back to the row data */ }
     $("modal-title").textContent = agent.name;
     $("modal-id").textContent = agent.id;
     const m = agent.metrics || {};
+    const rt = agent.runtime;
     $("modal-body").innerHTML = `
       <dl class="kv">
         <dt>Status</dt><dd>${pill(agent.status)}</dd>
         <dt>Type</dt><dd class="mono">${esc(agent.type)}</dd>
         <dt>Version</dt><dd>${esc(agent.version || "–")}</dd>
+        ${rt ? `<dt>Process</dt><dd>${esc(rt.state)}${rt.pid ? ` · pid ${rt.pid}` : ""}</dd>` : ""}
         <dt>Tasks</dt><dd>${m.tasks_completed ?? 0} completed · ${m.errors ?? 0} errors</dd>
         <dt>Created</dt><dd>${fmtTime(agent.created_at)}</dd>
         <dt>Updated</dt><dd>${fmtTime(agent.updated_at)}</dd>
       </dl>
       <h4>Config</h4>
-      <pre>${esc(JSON.stringify(agent.config || {}, null, 2))}</pre>`;
+      <pre>${esc(JSON.stringify(agent.config || {}, null, 2))}</pre>
+      ${log ? `<h4>Process log (last 40 lines)</h4><pre>${esc(log)}</pre>` : ""}`;
     backdrop.classList.add("show");
   }
 

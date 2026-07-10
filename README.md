@@ -94,6 +94,23 @@ uv run ao submit <agent-id> --payload '{"question": "hello"}'
 # Inspect a single agent or task
 uv run ao info <agent-id>
 uv run ao task <task-id>
+
+# Tail a process-backed agent's logs
+uv run ao logs <agent-id> --tail 100
+```
+
+### Process-backed agents
+
+Give an agent a `command` in its manifest config and starting it launches a
+real OS process (with `AO_AGENT_ID` in its environment). Stopping the agent
+terminates the process, stdout/stderr are captured for `ao logs` and the
+dashboard, and a crashed process automatically flips the agent to `failed`:
+
+```yaml
+name: heartbeat-agent
+type: monitor.heartbeat
+config:
+  command: "python3 -u heartbeat.py"
 ```
 
 Point the CLI at a remote orchestrator with `--api-url` (or `$AO_API_URL`), and
@@ -120,8 +137,9 @@ Interactive docs are served at `/api/docs`. Core endpoints under `/api/v2`:
 | `POST`   | `/agents`             | Register an agent                    |
 | `GET`    | `/agents`             | List agents (filter: status, group)  |
 | `GET`    | `/agents/{id}`        | Agent details                        |
-| `POST`   | `/agents/{id}/start`  | Start an agent                       |
-| `POST`   | `/agents/{id}/stop`   | Stop an agent                        |
+| `POST`   | `/agents/{id}/start`  | Start an agent (launches its process if configured) |
+| `POST`   | `/agents/{id}/stop`   | Stop an agent (terminates its process) |
+| `GET`    | `/agents/{id}/logs`   | Tail a process-backed agent's logs   |
 | `DELETE` | `/agents/{id}`        | Remove an agent                      |
 | `POST`   | `/tasks`              | Submit a task to an agent            |
 | `GET`    | `/tasks`              | Recent tasks (newest first)          |
