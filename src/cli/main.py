@@ -3,6 +3,7 @@
 import argparse
 import json
 import logging
+import os
 import sys
 import time
 from pathlib import Path
@@ -20,13 +21,39 @@ config:
   greeting: "Hello from Agent Orchestration"
 """
 
+# ANSI styling — honors NO_COLOR (https://no-color.org) and non-TTY output.
+_COLOR = sys.stdout.isatty() and not os.getenv("NO_COLOR")
+
+# one meaning per color, matching the dashboard: blue = active, green = success,
+# yellow = waiting/retrying, red = failure, dim = idle
+_STATUS_STYLE = {
+    "running": "34", "queued": "34",
+    "completed": "32",
+    "paused": "33", "retrying": "33",
+    "failed": "31", "terminated": "31",
+    "pending": "2", "stopped": "2",
+}
+
+
+def _style(code: str, text: str) -> str:
+    return f"\033[{code}m{text}\033[0m" if _COLOR else text
+
+
+def _status(status: str, pad: int = 0) -> str:
+    text = status.ljust(pad) if pad else status
+    return _style(_STATUS_STYLE.get(status, "2"), text)
+
+
+def _ok(message: str) -> None:
+    print(f"{_style('32', '✓')} {message}")
+
 
 def _client(args) -> OrchestratorClient:
     return OrchestratorClient(base_url=args.api_url, api_key=args.api_key)
 
 
 def _fail(message: str) -> None:
-    print(f"Error: {message}", file=sys.stderr)
+    print(f"{_style('31', '✗')} {message}", file=sys.stderr)
     sys.exit(1)
 
 
@@ -56,7 +83,7 @@ def cmd_init(args) -> None:
         _fail(f"Directory already exists: {project}")
     (project / "agents").mkdir(parents=True)
     (project / "agents" / "hello-agent.yaml").write_text(EXAMPLE_MANIFEST)
-    print(f"Initialized project: {project}")
+    _ok(f"Initialized project: {_style('1', str(project))}")
     print(f"  Deploy the example agent with: ao deploy {project}/agents/hello-agent.yaml")
 
 
@@ -78,7 +105,7 @@ def cmd_deploy(args) -> None:
         manifest["type"],
         manifest.get("config") or {},
     ))
-    print(f"Deployed agent '{manifest['name']}' (id: {result['agent_id']})")
+    _ok(f"Deployed agent {_style('1', manifest['name'])} (id: {result['agent_id']})")
 
 
 def _print_agents(agents: list) -> None:
@@ -86,12 +113,16 @@ def _print_agents(agents: list) -> None:
         print("No agents registered.")
         return
     header = f"{'ID':<38} {'NAME':<20} {'TYPE':<20} {'STATUS':<10} {'TASKS':>5} {'ERRORS':>6}"
-    print(header)
-    print("-" * len(header))
+    print(_style("1", header))
+    print(_style("2", "-" * len(header)))
     for a in agents:
         m = a.get("metrics", {})
-        print(f"{a['id']:<38} {a['name']:<20} {a['type']:<20} {a['status']:<10} "
-              f"{m.get('tasks_completed', 0):>5} {m.get('errors', 0):>6}")
+        errors = m.get("errors", 0)
+        agent_id = "{:<38}".format(a["id"])
+        errors_col = "{:>6}".format(errors)
+        print(f"{_style('2', agent_id)} {a['name']:<20} {a['type']:<20} "
+              f"{_status(a['status'], 10)} {m.get('tasks_completed', 0):>5} "
+              f"{_style('31', errors_col) if errors else errors_col}")
 
 
 def cmd_status(args) -> None:
@@ -123,7 +154,7 @@ def cmd_submit(args) -> None:
     client = _client(args)
     result = _check(client.submit_task(args.agent_id, payload=payload, priority=args.priority))
     task_id = result["task_id"]
-    print(f"Submitted task: {task_id}")
+    _ok(f"Submitted task: {task_id}")
 
     if args.wait:
         task = result
@@ -131,10 +162,11 @@ def cmd_submit(args) -> None:
         while time.time() < deadline:
             task = _check(client.get_task(task_id))
             if task["status"] in ("completed", "failed"):
+                print(f"  status: {_status(task['status'])}")
                 print(json.dumps(task, indent=2, default=str))
                 return
             time.sleep(0.2)
-        print(f"Task still {task.get('status', 'queued')} after {args.wait}s — "
+        print(f"Task still {_status(task.get('status', 'queued'))} after {args.wait}s — "
               f"check later with: ao task {task_id}")
 
 

@@ -3,6 +3,7 @@
 import asyncio
 import logging
 import time
+from collections import deque
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any, Callable, Dict, List, Optional
 
@@ -28,6 +29,8 @@ class OrchestrationEngine:
         self._running = False
         self._handlers: Dict[str, Callable] = {}
         self._tasks: Dict[str, Dict[str, Any]] = {}
+        # (timestamp, "completed" | "failed") outcomes for throughput history
+        self._outcomes: deque = deque(maxlen=5000)
         self._hooks: Dict[str, List[Callable]] = {
             "pre_execute": [],
             "post_execute": [],
@@ -76,6 +79,27 @@ class OrchestrationEngine:
         tasks = sorted(self._tasks.values(), key=lambda t: t.get("submitted_at", 0), reverse=True)
         return tasks[:limit]
 
+    def throughput(self, window: int = 300, bucket: int = 10) -> List[Dict[str, Any]]:
+        """Task outcomes bucketed over the trailing window, oldest bucket first.
+
+        Returns one entry per bucket: {"t": bucket_start, "completed": n, "failed": n},
+        including empty buckets so the series is contiguous.
+        """
+        now = time.time()
+        start = now - window
+        buckets: List[Dict[str, Any]] = []
+        edge = start - (start % bucket)
+        while edge < now:
+            buckets.append({"t": edge, "completed": 0, "failed": 0})
+            edge += bucket
+        for ts, outcome in self._outcomes:
+            if ts < start:
+                continue
+            idx = int((ts - buckets[0]["t"]) // bucket)
+            if 0 <= idx < len(buckets):
+                buckets[idx][outcome] += 1
+        return buckets
+
     def stats(self) -> Dict[str, Any]:
         agents_by_status: Dict[str, int] = {}
         for agent in self.registry.list():
@@ -90,6 +114,7 @@ class OrchestrationEngine:
                 "pending": self.scheduler.pending_count(),
                 "in_flight": self.scheduler.in_flight_count(),
             },
+            "throughput": self.throughput(),
             "engine_running": self._running,
         }
 
@@ -140,6 +165,7 @@ class OrchestrationEngine:
             record["status"] = "completed"
             record["result"] = result
             record["completed_at"] = time.time()
+            self._outcomes.append((record["completed_at"], "completed"))
             agent["metrics"]["tasks_completed"] += 1
 
             for hook in self._hooks["post_execute"]:
@@ -156,6 +182,8 @@ class OrchestrationEngine:
             will_retry = self.scheduler.fail(task_id)
             record["error"] = str(e)
             record["status"] = "retrying" if will_retry else "failed"
+            if not will_retry:
+                self._outcomes.append((time.time(), "failed"))
             for hook in self._hooks["on_error"]:
                 await hook(task, e)
 

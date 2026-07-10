@@ -113,6 +113,20 @@
   .legend .swatch { width: 9px; height: 9px; border-radius: 3px; }
   .legend .n { color: var(--ink); font-weight: 600; }
 
+  /* ---------- throughput chart ---------- */
+  .chart { position: relative; height: 120px; }
+  .chart svg { position: absolute; inset: 0; width: 100%; height: 100%; }
+  .chart .grid line { stroke: var(--grid); stroke-width: 1; }
+  .chart .baseline { stroke: var(--grid); stroke-width: 1; }
+  .chart .ytick { fill: var(--muted); font-size: 10px; }
+  .chart .xtick { fill: var(--muted); font-size: 10px; text-anchor: middle; }
+  .chart-tip {
+    position: absolute; display: none; pointer-events: none; z-index: 2;
+    background: var(--ink); color: var(--surface);
+    padding: 5px 9px; border-radius: 7px; font-size: 12px; white-space: nowrap;
+    transform: translate(-50%, calc(-100% - 8px));
+  }
+
   /* ---------- tables ---------- */
   table { width: 100%; border-collapse: collapse; font-size: 13px; }
   th {
@@ -183,6 +197,18 @@
     <h2>Tasks by status</h2>
     <div class="statusbar" id="statusbar"></div>
     <div class="legend" id="status-legend"></div>
+  </div>
+
+  <div class="card">
+    <h2>Throughput <span class="count">(tasks finished, last 5 minutes)</span></h2>
+    <div class="chart" id="chart">
+      <svg id="chart-svg" preserveAspectRatio="none"></svg>
+      <div class="chart-tip" id="chart-tip"></div>
+    </div>
+    <div class="legend">
+      <span class="key"><span class="swatch" style="background:var(--status-good)"></span>completed</span>
+      <span class="key"><span class="swatch" style="background:var(--status-crit)"></span>failed</span>
+    </div>
   </div>
 
   <div class="card">
@@ -266,6 +292,101 @@
       `<circle cx="${ex}" cy="${ey}" r="3"></circle>`;
   }
 
+  // ---- throughput chart: stacked columns, completed + failed per bucket ----
+  function roundedTopBar(x, y, w, h) {
+    const r = Math.min(4, w / 2, h); // 4px rounded data-end, square at the baseline
+    return `M${x},${y + h} L${x},${y + r} Q${x},${y} ${x + r},${y}` +
+           ` L${x + w - r},${y} Q${x + w},${y} ${x + w},${y + r} L${x + w},${y + h} Z`;
+  }
+
+  function niceCeil(v) {
+    if (v <= 5) return Math.max(2, v);
+    const mag = Math.pow(10, Math.floor(Math.log10(v)));
+    for (const m of [1, 2, 5, 10]) if (v <= m * mag) return m * mag;
+    return 10 * mag;
+  }
+
+  function renderChart(buckets) {
+    const chart = $("chart"), svg = $("chart-svg"), tip = $("chart-tip");
+    const W = chart.clientWidth || 900, H = 120;
+    const padL = 30, padR = 8, padT = 8, padB = 18;
+    const plotW = W - padL - padR, plotH = H - padT - padB;
+    svg.setAttribute("viewBox", `0 0 ${W} ${H}`);
+
+    const totals = buckets.map(b => b.completed + b.failed);
+    const rawMax = Math.max(...totals, 0);
+    if (!rawMax) {
+      svg.innerHTML =
+        `<line class="baseline" x1="${padL}" y1="${padT + plotH}" x2="${W - padR}" y2="${padT + plotH}"></line>` +
+        `<text class="ytick" x="${W / 2}" y="${padT + plotH / 2}" text-anchor="middle">no tasks finished in this window</text>`;
+      return;
+    }
+    const yMax = niceCeil(rawMax);
+    const yScale = (v) => plotH * (v / yMax);
+
+    let out = "";
+    // hairline gridlines + clean integer ticks (baseline, mid, top)
+    const ticks = [...new Set([yMax, Math.round(yMax / 2)])].filter(t => t > 0);
+    for (const t of ticks) {
+      const y = padT + plotH - yScale(t);
+      out += `<line class="grid" x1="${padL}" y1="${y}" x2="${W - padR}" y2="${y}"></line>`;
+      out += `<text class="ytick" x="${padL - 5}" y="${y + 3.5}" text-anchor="end">${t}</text>`;
+    }
+    out += `<line class="baseline" x1="${padL}" y1="${padT + plotH}" x2="${W - padR}" y2="${padT + plotH}"></line>`;
+
+    const n = buckets.length;
+    const slot = plotW / n;
+    const barW = Math.max(2, Math.min(24, slot - 2)); // ≤24px thick, ≥2px surface gap
+    const good = getComputedStyle(document.documentElement).getPropertyValue("--status-good").trim() || "#0ca30c";
+    const crit = getComputedStyle(document.documentElement).getPropertyValue("--status-crit").trim() || "#d03b3b";
+
+    buckets.forEach((b, i) => {
+      const x = padL + i * slot + (slot - barW) / 2;
+      const hDone = yScale(b.completed), hFail = yScale(b.failed);
+      const yBase = padT + plotH;
+      if (b.completed && b.failed) {
+        // completed sits on the baseline; failed stacks above a 2px surface gap
+        out += `<rect x="${x}" y="${yBase - hDone}" width="${barW}" height="${hDone}" fill="${good}"></rect>`;
+        out += `<path d="${roundedTopBar(x, yBase - hDone - 2 - hFail, barW, hFail)}" fill="${crit}"></path>`;
+      } else if (b.completed) {
+        out += `<path d="${roundedTopBar(x, yBase - hDone, barW, hDone)}" fill="${good}"></path>`;
+      } else if (b.failed) {
+        out += `<path d="${roundedTopBar(x, yBase - hFail, barW, hFail)}" fill="${crit}"></path>`;
+      }
+    });
+
+    // x labels: first, middle, last bucket start times (edge labels anchored
+    // inward so they never clip at the plot boundary)
+    const fmt = (ts) => new Date(ts * 1000).toLocaleTimeString([], {hour: "2-digit", minute: "2-digit", second: "2-digit"});
+    const xticks = [
+      [0, padL, "start"],
+      [Math.floor(n / 2), padL + plotW / 2, "middle"],
+      [n - 1, W - padR, "end"],
+    ];
+    for (const [i, x, anchor] of xticks) {
+      out += `<text class="xtick" x="${x}" y="${H - 4}" style="text-anchor:${anchor}">${fmt(buckets[i].t)}</text>`;
+    }
+
+    // hover targets: full-height hit rects (wider than the mark), one per bucket
+    buckets.forEach((b, i) => {
+      const cx = padL + i * slot + slot / 2;
+      out += `<rect x="${padL + i * slot}" y="${padT}" width="${slot}" height="${plotH}" fill="transparent"
+                data-i="${i}" data-cx="${cx}"></rect>`;
+    });
+    svg.innerHTML = out;
+
+    svg.querySelectorAll("rect[data-i]").forEach(r => {
+      r.addEventListener("mouseenter", () => {
+        const b = buckets[+r.dataset.i];
+        tip.textContent = `${fmt(b.t)} · completed ${b.completed} · failed ${b.failed}`;
+        tip.style.left = r.dataset.cx + "px";
+        tip.style.top = (padT + plotH - yScale(b.completed + b.failed)) + "px";
+        tip.style.display = "block";
+      });
+      r.addEventListener("mouseleave", () => { tip.style.display = "none"; });
+    });
+  }
+
   function renderStats(stats) {
     const t = stats.tasks.by_status || {};
     $("t-agents").textContent = stats.agents.total;
@@ -275,6 +396,7 @@
     $("t-failed").textContent = t.failed || 0;
     $("t-failed").classList.toggle("crit", (t.failed || 0) > 0);
     renderSpark(t.completed || 0);
+    renderChart(stats.throughput || []);
 
     const engine = $("engine");
     engine.classList.toggle("on", !!stats.engine_running);
