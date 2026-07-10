@@ -68,10 +68,12 @@ async def register_agent(request: Request, body: AgentCreate):
 
 @router.get("/agents/{agent_id}")
 async def get_agent(request: Request, agent_id: str):
-    agent = _engine(request).registry.get(agent_id)
+    engine = _engine(request)
+    agent = engine.registry.get(agent_id)
     if not agent:
         raise HTTPException(status_code=404, detail="Agent not found")
-    return agent
+    runtime = engine.runtime_info(agent_id)
+    return {**agent, "runtime": runtime} if runtime else agent
 
 
 @router.delete("/agents/{agent_id}")
@@ -83,16 +85,34 @@ async def delete_agent(request: Request, agent_id: str):
 
 @router.post("/agents/{agent_id}/start")
 async def start_agent(request: Request, agent_id: str):
-    if not _engine(request).registry.update_status(agent_id, AgentStatus.RUNNING):
+    engine = _engine(request)
+    try:
+        started = engine.start_agent(agent_id)
+    except AgentNotFoundError:
         raise HTTPException(status_code=404, detail="Agent not found")
-    return {"status": "started"}
+    if not started:
+        raise HTTPException(status_code=502, detail="Agent process failed to launch — check its command")
+    result = {"status": "started"}
+    runtime = engine.runtime_info(agent_id)
+    return {**result, "runtime": runtime} if runtime else result
 
 
 @router.post("/agents/{agent_id}/stop")
 async def stop_agent(request: Request, agent_id: str):
-    if not _engine(request).registry.update_status(agent_id, AgentStatus.PAUSED):
+    try:
+        _engine(request).stop_agent(agent_id)
+    except AgentNotFoundError:
         raise HTTPException(status_code=404, detail="Agent not found")
     return {"status": "stopped"}
+
+
+@router.get("/agents/{agent_id}/logs")
+async def agent_logs(request: Request, agent_id: str, tail: int = 50):
+    engine = _engine(request)
+    if not engine.registry.get(agent_id):
+        raise HTTPException(status_code=404, detail="Agent not found")
+    log = engine.agent_log_tail(agent_id, lines=max(1, min(tail, 1000)))
+    return {"agent_id": agent_id, "log": log or ""}
 
 
 @router.post("/tasks", status_code=201)

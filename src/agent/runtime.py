@@ -22,8 +22,10 @@ class AgentRuntime:
     def __init__(self):
         self._processes: Dict[str, subprocess.Popen] = {}
         self._states: Dict[str, RuntimeState] = {}
+        self._log_files: Dict[str, str] = {}
 
-    def start(self, agent_id: str, command: list, env: Optional[Dict] = None) -> bool:
+    def start(self, agent_id: str, command: list,
+              env: Optional[Dict] = None, log_path: Optional[str] = None) -> bool:
         if agent_id in self._processes and self._processes[agent_id].poll() is None:
             logger.warning(f"Agent {agent_id} is already running")
             return False
@@ -34,21 +36,30 @@ class AgentRuntime:
             process_env.update(env)
         process_env["AO_AGENT_ID"] = agent_id
 
+        # Stdout/stderr go to a log file rather than pipes — nobody drains a
+        # pipe here, and a full pipe buffer would block the agent process.
+        log_handle = open(log_path, "ab") if log_path else subprocess.DEVNULL
+
         try:
             proc = subprocess.Popen(
                 command,
                 env=process_env,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
+                stdout=log_handle,
+                stderr=subprocess.STDOUT if log_path else subprocess.DEVNULL,
             )
             self._processes[agent_id] = proc
             self._states[agent_id] = RuntimeState.RUNNING
+            if log_path:
+                self._log_files[agent_id] = log_path
             logger.info(f"Agent {agent_id} started (PID: {proc.pid})")
             return True
         except Exception as e:
             self._states[agent_id] = RuntimeState.CRASHED
             logger.error(f"Failed to start agent {agent_id}: {e}")
             return False
+        finally:
+            if log_path:
+                log_handle.close()
 
     def stop(self, agent_id: str, timeout: int = 10) -> bool:
         proc = self._processes.get(agent_id)
@@ -76,3 +87,14 @@ class AgentRuntime:
     def is_running(self, agent_id: str) -> bool:
         proc = self._processes.get(agent_id)
         return proc is not None and proc.poll() is None
+
+    def pid(self, agent_id: str) -> Optional[int]:
+        proc = self._processes.get(agent_id)
+        return proc.pid if proc and proc.poll() is None else None
+
+    def log_path(self, agent_id: str) -> Optional[str]:
+        return self._log_files.get(agent_id)
+
+    def stop_all(self) -> None:
+        for agent_id in list(self._processes):
+            self.stop(agent_id)

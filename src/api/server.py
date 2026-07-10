@@ -31,6 +31,7 @@ def create_app(config: Optional[Dict] = None) -> FastAPI:
         engine_task = asyncio.create_task(engine.start())
         yield
         engine.stop()
+        engine.runtime.stop_all()
         with contextlib.suppress(asyncio.TimeoutError, asyncio.CancelledError):
             await asyncio.wait_for(engine_task, timeout=2)
 

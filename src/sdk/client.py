@@ -63,6 +63,9 @@ class OrchestratorClient:
     def count_agents(self) -> Dict:
         return self._request("GET", "/agents/count")
 
+    def get_agent_logs(self, agent_id: str, tail: int = 50) -> Dict:
+        return self._request("GET", f"/agents/{agent_id}/logs", params={"tail": tail})
+
     # -- Tasks -------------------------------------------------------------
 
     def submit_task(self, target_agent: str, payload: Optional[Dict] = None,
