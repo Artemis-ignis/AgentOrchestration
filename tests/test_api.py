@@ -102,6 +102,44 @@ class TestAgentRoutes:
         assert stats["tasks"]["total"] == 1
         assert stats["engine_running"] is True
 
+    def test_workflow_create_run_and_get(self):
+        import time
+        agent_id = self._register()
+        resp = self.client.post("/api/v2/workflows", json={
+            "name": "etl",
+            "description": "demo",
+            "steps": [
+                {"name": "extract", "target_agent": agent_id, "payload": {"stage": 1}},
+                {"name": "load", "target_agent": agent_id, "payload": {"stage": 2}},
+            ],
+        })
+        assert resp.status_code == 201
+        wf_id = resp.json()["workflow_id"]
+
+        assert self.client.post(f"/api/v2/workflows/{wf_id}/run").status_code == 202
+        for _ in range(100):
+            wf = self.client.get(f"/api/v2/workflows/{wf_id}").json()
+            if wf["status"] in ("completed", "failed"):
+                break
+            time.sleep(0.05)
+        assert wf["status"] == "completed"
+        assert [s["status"] for s in wf["steps"]] == ["completed", "completed"]
+
+        listed = self.client.get("/api/v2/workflows").json()["workflows"]
+        assert len(listed) == 1
+        assert self.client.delete(f"/api/v2/workflows/{wf_id}").status_code == 200
+
+    def test_workflow_create_unknown_agent(self):
+        resp = self.client.post("/api/v2/workflows", json={
+            "name": "bad",
+            "steps": [{"name": "s", "target_agent": "ghost"}],
+        })
+        assert resp.status_code == 404
+
+    def test_workflow_needs_steps(self):
+        resp = self.client.post("/api/v2/workflows", json={"name": "empty", "steps": []})
+        assert resp.status_code == 422
+
     def test_dashboard_served(self):
         resp = self.client.get("/")
         assert resp.status_code == 200

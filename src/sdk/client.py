@@ -80,6 +80,27 @@ class OrchestratorClient:
     def list_tasks(self, limit: int = 50) -> Dict:
         return self._request("GET", "/tasks", params={"limit": limit})
 
+    # -- Workflows ---------------------------------------------------------
+
+    def create_workflow(self, name: str, steps: list, description: str = "") -> Dict:
+        return self._request("POST", "/workflows", json={
+            "name": name,
+            "description": description,
+            "steps": steps,
+        })
+
+    def list_workflows(self) -> Dict:
+        return self._request("GET", "/workflows")
+
+    def get_workflow(self, workflow_id: str) -> Dict:
+        return self._request("GET", f"/workflows/{workflow_id}")
+
+    def run_workflow(self, workflow_id: str) -> Dict:
+        return self._request("POST", f"/workflows/{workflow_id}/run")
+
+    def delete_workflow(self, workflow_id: str) -> Dict:
+        return self._request("DELETE", f"/workflows/{workflow_id}")
+
     # -- Platform ----------------------------------------------------------
 
     def get_metrics(self) -> Dict:

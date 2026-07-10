@@ -20,7 +20,7 @@ A distributed platform for orchestrating autonomous AI agents in enterprise envi
 
 ## Dashboard
 
-The built-in dashboard is served at `/` — live agent status, throughput, task queue, and platform metrics, refreshed every 2 seconds. Agents can be started and stopped from the table, and clicking a task opens its full payload, result, and timing. Light and dark themes follow your system.
+The built-in dashboard is served at `/` — live agent status, throughput, workflows, task queue, and platform metrics, refreshed every 2 seconds. Agents can be started and stopped from the table, tasks can be submitted straight from the form, workflows run with one click and show per-step progress, and clicking any agent or task opens its full detail. Light and dark themes follow your system.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/assets/dashboard-dark.png">
@@ -116,6 +116,10 @@ Interactive docs are served at `/api/docs`. Core endpoints under `/api/v2`:
 | `POST`   | `/tasks`              | Submit a task to an agent            |
 | `GET`    | `/tasks`              | Recent tasks (newest first)          |
 | `GET`    | `/tasks/{id}`         | Task status and result               |
+| `POST`   | `/workflows`          | Create a workflow of agent-task steps |
+| `GET`    | `/workflows`          | List workflows with per-step status  |
+| `POST`   | `/workflows/{id}/run` | Execute a workflow's steps in order  |
+| `DELETE` | `/workflows/{id}`     | Remove a workflow                    |
 | `GET`    | `/stats`              | Agent/task/queue aggregates          |
 | `GET`    | `/metrics`            | Platform metrics snapshot            |
 
