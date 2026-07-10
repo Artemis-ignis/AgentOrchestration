@@ -50,6 +50,60 @@ class TestOrchestrationEngine:
 
         assert engine.get_task(task_id)["result"] == 42
 
+    def test_run_workflow_task_steps(self):
+        from src.orchestrator.workflow import StepStatus, WorkflowStep
+
+        engine = OrchestrationEngine()
+        agent_id = engine.registry.register("worker", "worker.doubler")
+        engine.register_handler("worker.doubler", lambda agent, task: task["payload"]["n"] * 2)
+
+        wf = engine.workflows.create_workflow("double-twice")
+        wf.add_step(WorkflowStep("first", target_agent=agent_id, payload={"n": 2}))
+        wf.add_step(WorkflowStep("second", target_agent=agent_id, payload={"n": 10}))
+
+        async def run():
+            engine_task = asyncio.create_task(engine.start())
+            try:
+                ok = await asyncio.wait_for(engine.run_workflow(wf.id), timeout=5)
+            finally:
+                engine.stop()
+                await asyncio.wait_for(engine_task, timeout=2)
+            return ok
+
+        assert asyncio.run(run())
+        assert wf.status == StepStatus.COMPLETED
+        assert [s.result for s in wf.steps] == [4, 20]
+
+    def test_run_workflow_stops_on_failed_step(self):
+        from src.orchestrator.workflow import StepStatus, WorkflowStep
+
+        engine = OrchestrationEngine()
+        engine.scheduler._max_retries = 0
+        agent_id = engine.registry.register("worker", "worker.broken")
+
+        def broken(agent, task):
+            raise RuntimeError("boom")
+
+        engine.register_handler("worker.broken", broken)
+        wf = engine.workflows.create_workflow("doomed")
+        wf.add_step(WorkflowStep("explode", target_agent=agent_id))
+        never = WorkflowStep("never", target_agent=agent_id)
+        wf.add_step(never)
+
+        async def run():
+            engine_task = asyncio.create_task(engine.start())
+            try:
+                ok = await asyncio.wait_for(engine.run_workflow(wf.id), timeout=5)
+            finally:
+                engine.stop()
+                await asyncio.wait_for(engine_task, timeout=2)
+            return ok
+
+        assert not asyncio.run(run())
+        assert wf.status == StepStatus.FAILED
+        assert wf.steps[0].error == "boom"
+        assert never.status == StepStatus.PENDING
+
     def test_throughput_buckets_outcomes(self):
         import time
 

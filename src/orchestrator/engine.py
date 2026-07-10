@@ -10,6 +10,7 @@ from typing import Any, Callable, Dict, List, Optional
 from src.agent import AgentRegistry, AgentStatus
 from src.common.errors import AgentNotFoundError
 from src.orchestrator.scheduler import TaskScheduler
+from src.orchestrator.workflow import StepStatus, WorkflowManager
 
 logger = logging.getLogger(__name__)
 
@@ -24,6 +25,7 @@ class OrchestrationEngine:
     ):
         self.registry = registry or AgentRegistry()
         self.scheduler = scheduler or TaskScheduler()
+        self.workflows = WorkflowManager()
         self.executor = ThreadPoolExecutor(max_workers=max_workers)
         self.agent_timeout = agent_timeout
         self._running = False
@@ -78,6 +80,48 @@ class OrchestrationEngine:
         """Most recently submitted tasks first."""
         tasks = sorted(self._tasks.values(), key=lambda t: t.get("submitted_at", 0), reverse=True)
         return tasks[:limit]
+
+    async def run_workflow(self, workflow_id: str, step_timeout: float = 60.0) -> bool:
+        """Execute a workflow's steps in order.
+
+        Task steps are submitted to their agent and awaited; handler steps run
+        in the worker pool. Stops at the first failed step.
+        """
+        workflow = self.workflows.get_workflow(workflow_id)
+        if not workflow:
+            return False
+
+        workflow.status = StepStatus.RUNNING
+        for step in workflow.steps:
+            step.status = StepStatus.RUNNING
+            step.error = None
+            try:
+                if step.target_agent:
+                    task_id = self.submit_task(step.target_agent, payload=dict(step.payload))
+                    step.result = {"task_id": task_id}
+                    deadline = time.time() + step_timeout
+                    while time.time() < deadline:
+                        record = self._tasks[task_id]
+                        if record["status"] == "completed":
+                            step.result = record["result"]
+                            break
+                        if record["status"] == "failed":
+                            raise RuntimeError(record["error"] or "task failed")
+                        await asyncio.sleep(0.05)
+                    else:
+                        raise TimeoutError(f"step timed out after {step_timeout}s")
+                else:
+                    loop = asyncio.get_event_loop()
+                    step.result = await loop.run_in_executor(self.executor, step.handler)
+                step.status = StepStatus.COMPLETED
+            except Exception as e:
+                step.error = str(e)
+                step.status = StepStatus.FAILED
+                workflow.status = StepStatus.FAILED
+                return False
+
+        workflow.status = StepStatus.COMPLETED
+        return True
 
     def throughput(self, window: int = 300, bucket: int = 10) -> List[Dict[str, Any]]:
         """Task outcomes bucketed over the trailing window, oldest bucket first.

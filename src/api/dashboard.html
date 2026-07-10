@@ -161,6 +161,47 @@
   .pill.terminated .dot { background: var(--status-serious); }
   .pill.terminated { color: var(--serious-text); }
 
+  /* ---------- submit form ---------- */
+  .submit-form { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 14px; }
+  .submit-form select, .submit-form input {
+    padding: 6px 10px; font: inherit; font-size: 13px;
+    color: var(--ink); background: var(--page);
+    border: 1px solid var(--grid); border-radius: 8px;
+  }
+  .submit-form select { min-width: 180px; }
+  .submit-form input.payload { flex: 1; min-width: 220px; font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; font-size: 12px; }
+  .submit-form input.prio { width: 64px; }
+  .submit-form button {
+    padding: 6px 16px; font: inherit; font-size: 13px; font-weight: 600; cursor: pointer;
+    color: var(--surface); background: var(--ink); border: 0; border-radius: 8px;
+  }
+  .submit-form button:disabled { opacity: 0.45; cursor: default; }
+  .form-msg { font-size: 12.5px; margin: -6px 0 10px; min-height: 17px; }
+  .form-msg.ok { color: var(--good-text); }
+  .form-msg.err { color: var(--crit-text); }
+
+  /* ---------- workflow pipeline ---------- */
+  .wf { padding: 10px 0 4px; border-bottom: 1px solid var(--grid); }
+  .wf:last-child { border-bottom: 0; }
+  .wf-head { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; }
+  .wf-head .name { font-weight: 600; }
+  .wf-head .desc { color: var(--muted); font-size: 12.5px; }
+  .wf-head .btn { margin-left: auto; }
+  .pipeline { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 0; padding-bottom: 8px; }
+  .step {
+    display: inline-flex; align-items: center; gap: 7px;
+    padding: 5px 12px; border: 1px solid var(--grid); border-radius: 9px;
+    font-size: 12.5px; color: var(--ink-2); background: var(--page); white-space: nowrap;
+  }
+  .step .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); flex: none; }
+  .step.running   { border-color: var(--series-1); color: var(--ink); }
+  .step.running   .dot { background: var(--series-1); }
+  .step.completed { border-color: color-mix(in srgb, var(--status-good) 45%, var(--grid)); }
+  .step.completed .dot { background: var(--status-good); }
+  .step.failed    { border-color: var(--status-crit); color: var(--crit-text); }
+  .step.failed    .dot { background: var(--status-crit); }
+  .step-link { width: 22px; height: 1px; background: var(--grid); flex: none; }
+
   /* ---------- row action buttons ---------- */
   .btn {
     padding: 3px 12px; font: inherit; font-size: 12px; font-weight: 600; cursor: pointer;
@@ -259,7 +300,19 @@
   </div>
 
   <div class="card">
+    <h2>Workflows <span class="count" id="wf-count"></span></h2>
+    <div id="wf-body"></div>
+  </div>
+
+  <div class="card">
     <h2>Recent tasks <span class="count" id="tasks-count"></span></h2>
+    <form class="submit-form" id="submit-form">
+      <select id="sf-agent" aria-label="Target agent"><option value="">Select an agent…</option></select>
+      <input class="payload" id="sf-payload" placeholder='{"key": "value"} — optional JSON payload' aria-label="Payload">
+      <input class="prio" id="sf-prio" type="number" value="0" title="Priority" aria-label="Priority">
+      <button type="submit" id="sf-go">Submit task</button>
+    </form>
+    <div class="form-msg" id="sf-msg"></div>
     <div id="tasks-body"></div>
   </div>
 
@@ -305,10 +358,19 @@
     tick();
   });
 
-  async function api(path, method = "GET") {
-    const resp = await fetch(path, {method, headers: headers()});
+  async function api(path, method = "GET", body = undefined) {
+    const opts = {method, headers: headers()};
+    if (body !== undefined) {
+      opts.headers = {...opts.headers, "Content-Type": "application/json"};
+      opts.body = JSON.stringify(body);
+    }
+    const resp = await fetch(path, opts);
     if (resp.status === 401) { $("auth-banner").classList.add("show"); throw new Error("unauthorized"); }
-    if (!resp.ok) throw new Error("HTTP " + resp.status);
+    if (!resp.ok) {
+      let detail = "HTTP " + resp.status;
+      try { detail = (await resp.json()).detail || detail; } catch (e) { /* keep default */ }
+      throw new Error(detail);
+    }
     return resp.json();
   }
 
@@ -498,6 +560,39 @@
       `<table><thead><tr><th>Agent</th><th>ID</th><th>Status</th>
        <th class="num">Tasks</th><th class="num">Errors</th><th class="num">Updated</th><th class="num"></th></tr></thead>
        <tbody>${rows}</tbody></table>`;
+
+    // keep the submit form's agent list in sync without losing the selection
+    const select = $("sf-agent");
+    const chosen = select.value;
+    select.innerHTML = `<option value="">Select an agent…</option>` +
+      agents.map(a => `<option value="${esc(a.id)}">${esc(a.name)} (${esc(a.type)})</option>`).join("");
+    if ([...select.options].some(o => o.value === chosen)) select.value = chosen;
+  }
+
+  function renderWorkflows(workflows) {
+    $("wf-count").textContent = workflows.length ? `(${workflows.length})` : "";
+    if (!workflows.length) {
+      $("wf-body").innerHTML =
+        `<div class="empty">No workflows yet — create one via <code>POST /api/v2/workflows</code></div>`;
+      return;
+    }
+    $("wf-body").innerHTML = workflows.map(w => {
+      const steps = w.steps.map((s, i) => {
+        const tip = s.error ? ` title="${esc(s.error)}"` : "";
+        return (i ? `<span class="step-link"></span>` : "") +
+          `<span class="step ${esc(s.status)}"${tip}><span class="dot"></span>${esc(s.name)}</span>`;
+      }).join("");
+      const running = w.status === "running";
+      return `<div class="wf">
+        <div class="wf-head">
+          <span class="name">${esc(w.name)}</span>
+          ${w.description ? `<span class="desc">${esc(w.description)}</span>` : ""}
+          ${pill(w.status)}
+          <button class="btn" data-run-wf="${esc(w.id)}" ${running ? "disabled" : ""}>Run</button>
+        </div>
+        <div class="pipeline">${steps}</div>
+      </div>`;
+    }).join("");
   }
 
   function renderTasks(tasks) {
@@ -526,15 +621,65 @@
        <tbody>${rows}</tbody></table>`;
   }
 
-  // ---- agent start/stop controls ----
+  // ---- agent start/stop controls + agent detail modal ----
   $("agents-body").addEventListener("click", async (ev) => {
     const btn = ev.target.closest("button[data-action]");
+    if (btn) {
+      btn.disabled = true;
+      try {
+        await api(`/api/v2/agents/${btn.dataset.id}/${btn.dataset.action}`, "POST");
+        await tick();
+      } catch (e) { btn.disabled = false; }
+      return;
+    }
+    const row = ev.target.closest("tr");
+    const idCell = row && row.querySelector("td.mono");
+    if (idCell) {
+      const agent = lastAgents.find(a => a.id.startsWith(idCell.textContent.trim()));
+      if (agent) openAgent(agent);
+    }
+  });
+
+  // ---- workflow run ----
+  $("wf-body").addEventListener("click", async (ev) => {
+    const btn = ev.target.closest("button[data-run-wf]");
     if (!btn) return;
     btn.disabled = true;
     try {
-      await api(`/api/v2/agents/${btn.dataset.id}/${btn.dataset.action}`, "POST");
+      await api(`/api/v2/workflows/${btn.dataset.runWf}/run`, "POST");
       await tick();
     } catch (e) { btn.disabled = false; }
+  });
+
+  // ---- task submit form ----
+  $("submit-form").addEventListener("submit", async (ev) => {
+    ev.preventDefault();
+    const msg = $("sf-msg");
+    const agentId = $("sf-agent").value;
+    if (!agentId) { msg.className = "form-msg err"; msg.textContent = "Pick a target agent first."; return; }
+    let payload = {};
+    const rawPayload = $("sf-payload").value.trim();
+    if (rawPayload) {
+      try { payload = JSON.parse(rawPayload); }
+      catch (e) { msg.className = "form-msg err"; msg.textContent = "Payload is not valid JSON."; return; }
+    }
+    $("sf-go").disabled = true;
+    try {
+      const r = await api("/api/v2/tasks", "POST", {
+        target_agent: agentId,
+        payload,
+        priority: parseInt($("sf-prio").value, 10) || 0,
+      });
+      msg.className = "form-msg ok";
+      msg.textContent = `Task ${r.task_id.slice(0, 8)} submitted.`;
+      $("sf-payload").value = "";
+      await tick();
+    } catch (e) {
+      msg.className = "form-msg err";
+      msg.textContent = e.message === "unauthorized" ? "Unauthorized — set the API key above." : e.message;
+    } finally {
+      $("sf-go").disabled = false;
+    }
   });
 
   // ---- task detail modal ----
@@ -547,9 +692,28 @@
   backdrop.addEventListener("click", (ev) => { if (ev.target === backdrop) closeModal(); });
   document.addEventListener("keydown", (ev) => { if (ev.key === "Escape") closeModal(); });
 
+  function openAgent(agent) {
+    $("modal-title").textContent = agent.name;
+    $("modal-id").textContent = agent.id;
+    const m = agent.metrics || {};
+    $("modal-body").innerHTML = `
+      <dl class="kv">
+        <dt>Status</dt><dd>${pill(agent.status)}</dd>
+        <dt>Type</dt><dd class="mono">${esc(agent.type)}</dd>
+        <dt>Version</dt><dd>${esc(agent.version || "–")}</dd>
+        <dt>Tasks</dt><dd>${m.tasks_completed ?? 0} completed · ${m.errors ?? 0} errors</dd>
+        <dt>Created</dt><dd>${fmtTime(agent.created_at)}</dd>
+        <dt>Updated</dt><dd>${fmtTime(agent.updated_at)}</dd>
+      </dl>
+      <h4>Config</h4>
+      <pre>${esc(JSON.stringify(agent.config || {}, null, 2))}</pre>`;
+    backdrop.classList.add("show");
+  }
+
   async function openTask(taskId) {
     let task;
     try { task = await api(`/api/v2/tasks/${taskId}`); } catch (e) { return; }
+    $("modal-title").textContent = "Task";
     $("modal-id").textContent = task.id;
     const dur = task.completed_at ? (task.completed_at - task.submitted_at).toFixed(3) + "s" : "–";
     let html = `
@@ -577,18 +741,23 @@
     if (row) openTask(row.dataset.task);
   });
 
+  let lastAgents = [];
+
   async function tick() {
     try {
-      const [health, stats, agents, tasks] = await Promise.all([
+      const [health, stats, agents, tasks, workflows] = await Promise.all([
         fetch("/health").then(r => r.json()),
         api("/api/v2/stats"),
         api("/api/v2/agents"),
         api("/api/v2/tasks?limit=15"),
+        api("/api/v2/workflows"),
       ]);
       $("version").textContent = "v" + health.version;
+      lastAgents = agents.agents;
       renderStats(stats);
       renderAgents(agents.agents);
       renderTasks(tasks.tasks);
+      renderWorkflows(workflows.workflows);
     } catch (e) {
       if (e.message !== "unauthorized") {
         $("engine").classList.remove("on");

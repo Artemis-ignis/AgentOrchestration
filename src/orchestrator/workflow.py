@@ -14,15 +14,41 @@ class StepStatus(Enum):
 
 
 class WorkflowStep:
-    def __init__(self, name: str, handler: Callable, retries: int = 0, timeout: int = 300):
+    """A workflow step: either a Python callable (`handler`) or a task
+    dispatched to an agent (`target_agent` + `payload`)."""
+
+    def __init__(
+        self,
+        name: str,
+        handler: Optional[Callable] = None,
+        retries: int = 0,
+        timeout: int = 300,
+        target_agent: Optional[str] = None,
+        payload: Optional[Dict] = None,
+    ):
+        if handler is None and target_agent is None:
+            raise ValueError("WorkflowStep needs a handler or a target_agent")
         self.id = str(uuid4())
         self.name = name
         self.handler = handler
         self.retries = retries
         self.timeout = timeout
+        self.target_agent = target_agent
+        self.payload = payload or {}
         self.status = StepStatus.PENDING
         self.result: Any = None
         self.error: Optional[str] = None
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "id": self.id,
+            "name": self.name,
+            "kind": "task" if self.target_agent else "handler",
+            "target_agent": self.target_agent,
+            "status": self.status.value,
+            "result": self.result,
+            "error": self.error,
+        }
 
 
 class Workflow:
@@ -41,6 +67,15 @@ class Workflow:
 
     def get_step(self, step_id: str) -> Optional[WorkflowStep]:
         return self._step_map.get(step_id)
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "id": self.id,
+            "name": self.name,
+            "description": self.description,
+            "status": self.status.value,
+            "steps": [s.to_dict() for s in self.steps],
+        }
 
 
 class WorkflowManager:
@@ -68,6 +103,11 @@ class WorkflowManager:
 
         workflow.status = StepStatus.RUNNING
         for step in workflow.steps:
+            if step.handler is None:
+                step.status = StepStatus.FAILED
+                step.error = "task steps require OrchestrationEngine.run_workflow"
+                workflow.status = StepStatus.FAILED
+                return False
             step.status = StepStatus.RUNNING
             attempts = step.retries + 1
             for attempt in range(1, attempts + 1):
