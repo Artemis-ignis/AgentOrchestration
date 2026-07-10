@@ -141,6 +141,7 @@ async def create_workflow(request: Request, body: WorkflowCreate):
     workflow = engine.workflows.create_workflow(body.name, body.description)
     for s in body.steps:
         workflow.add_step(WorkflowStep(s.name, target_agent=s.target_agent, payload=s.payload))
+    engine.persist_workflow(workflow)
     return {"workflow_id": workflow.id, "status": "created"}
 
 
@@ -166,8 +167,11 @@ async def run_workflow(request: Request, workflow_id: str):
 
 @router.delete("/workflows/{workflow_id}")
 async def delete_workflow(request: Request, workflow_id: str):
-    if not _engine(request).workflows.delete_workflow(workflow_id):
+    engine = _engine(request)
+    if not engine.workflows.delete_workflow(workflow_id):
         raise HTTPException(status_code=404, detail="Workflow not found")
+    if engine.store:
+        engine.store.delete_workflow(workflow_id)
     return {"status": "deleted"}
 
 

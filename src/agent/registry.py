@@ -16,10 +16,16 @@ class AgentStatus(Enum):
 
 
 class AgentRegistry:
-    def __init__(self, storage_backend: str = "memory"):
+    def __init__(self, storage_backend: str = "memory", store=None):
         self.storage_backend = storage_backend
+        self._store = store
         self._agents: Dict[str, Dict[str, Any]] = {}
         self._index: Dict[str, List[str]] = {}
+        if store:
+            for agent in store.load_agents():
+                self._agents[agent["id"]] = agent
+                group = agent["type"].split(".")[0]
+                self._index.setdefault(group, []).append(agent["id"])
 
     def register(self, name: str, agent_type: str, config: Optional[Dict] = None) -> str:
         agent_id = str(uuid.uuid4())
@@ -39,7 +45,14 @@ class AgentRegistry:
         if group not in self._index:
             self._index[group] = []
         self._index[group].append(agent_id)
+        if self._store:
+            self._store.upsert_agent(self._agents[agent_id])
         return agent_id
+
+    def touch(self, agent_id: str) -> None:
+        """Persist in-place mutations (e.g. metric updates) of an agent dict."""
+        if self._store and agent_id in self._agents:
+            self._store.upsert_agent(self._agents[agent_id])
 
     def get(self, agent_id: str) -> Optional[Dict[str, Any]]:
         return self._agents.get(agent_id)
@@ -58,6 +71,8 @@ class AgentRegistry:
             return False
         self._agents[agent_id]["status"] = status.value
         self._agents[agent_id]["updated_at"] = time.time()
+        if self._store:
+            self._store.upsert_agent(self._agents[agent_id])
         return True
 
     def delete(self, agent_id: str) -> bool:
@@ -67,6 +82,8 @@ class AgentRegistry:
         group = agent["type"].split(".")[0]
         if group in self._index and agent_id in self._index[group]:
             self._index[group].remove(agent_id)
+        if self._store:
+            self._store.delete_agent(agent_id)
         return True
 
     def count(self) -> int:

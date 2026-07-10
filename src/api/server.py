@@ -23,6 +23,7 @@ def create_app(config: Optional[Dict] = None) -> FastAPI:
     engine = OrchestrationEngine(
         max_workers=config.get("max_workers", 10),
         agent_timeout=config.get("agent_timeout", 300),
+        db_path=config.get("db_path"),
     )
 
     @asynccontextmanager

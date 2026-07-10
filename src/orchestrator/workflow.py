@@ -45,6 +45,7 @@ class WorkflowStep:
             "name": self.name,
             "kind": "task" if self.target_agent else "handler",
             "target_agent": self.target_agent,
+            "payload": self.payload,
             "status": self.status.value,
             "result": self.result,
             "error": self.error,
@@ -77,6 +78,25 @@ class Workflow:
             "steps": [s.to_dict() for s in self.steps],
         }
 
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> "Workflow":
+        """Rebuild a persisted workflow. Only task steps survive a reload —
+        handler callables cannot be serialized."""
+        workflow = cls(data["name"], data.get("description", ""))
+        workflow.id = data["id"]
+        workflow.status = StepStatus(data.get("status", "pending"))
+        for s in data.get("steps", []):
+            if not s.get("target_agent"):
+                continue
+            step = WorkflowStep(s["name"], target_agent=s["target_agent"], payload=s.get("payload") or {})
+            step.id = s["id"]
+            step.status = StepStatus(s.get("status", "pending"))
+            step.result = s.get("result")
+            step.error = s.get("error")
+            workflow._step_map[step.id] = step
+            workflow.steps.append(step)
+        return workflow
+
 
 class WorkflowManager:
     def __init__(self):
@@ -86,6 +106,9 @@ class WorkflowManager:
         workflow = Workflow(name, description)
         self._workflows[workflow.id] = workflow
         return workflow
+
+    def add_workflow(self, workflow: Workflow) -> None:
+        self._workflows[workflow.id] = workflow
 
     def get_workflow(self, workflow_id: str) -> Optional[Workflow]:
         return self._workflows.get(workflow_id)

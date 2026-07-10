@@ -2,6 +2,7 @@
 
 import asyncio
 import logging
+import os
 import time
 from collections import deque
 from concurrent.futures import ThreadPoolExecutor
@@ -9,8 +10,9 @@ from typing import Any, Callable, Dict, List, Optional
 
 from src.agent import AgentRegistry, AgentStatus
 from src.common.errors import AgentNotFoundError
+from src.common.store import SqliteStore
 from src.orchestrator.scheduler import TaskScheduler
-from src.orchestrator.workflow import StepStatus, WorkflowManager
+from src.orchestrator.workflow import StepStatus, Workflow, WorkflowManager
 
 logger = logging.getLogger(__name__)
 
@@ -22,8 +24,11 @@ class OrchestrationEngine:
         agent_timeout: int = 300,
         registry: Optional[AgentRegistry] = None,
         scheduler: Optional[TaskScheduler] = None,
+        db_path: Optional[str] = None,
     ):
-        self.registry = registry or AgentRegistry()
+        db_path = db_path if db_path is not None else os.getenv("AO_DB_PATH", "")
+        self.store = SqliteStore(db_path) if db_path else None
+        self.registry = registry or AgentRegistry(store=self.store)
         self.scheduler = scheduler or TaskScheduler()
         self.workflows = WorkflowManager()
         self.executor = ThreadPoolExecutor(max_workers=max_workers)
@@ -39,6 +44,48 @@ class OrchestrationEngine:
             "on_error": [],
             "on_complete": [],
         }
+        if self.store:
+            self._restore_state()
+
+    def _restore_state(self) -> None:
+        """Reload persisted tasks and workflows, re-enqueueing work that never
+        finished (queued/retrying/running at the time of shutdown)."""
+        requeued = 0
+        for record in self.store.load_tasks():
+            self._tasks[record["id"]] = record
+            if record["status"] in ("queued", "retrying", "running"):
+                record["status"] = "queued"
+                task = {
+                    "id": record["id"],
+                    "target_agent": record["target_agent"],
+                    "payload": record.get("payload") or {},
+                }
+                self.scheduler.enqueue(
+                    task,
+                    queue=record.get("queue", "default"),
+                    priority=record.get("priority", 0),
+                )
+                requeued += 1
+        for data in self.store.load_workflows():
+            workflow = Workflow.from_dict(data)
+            # a workflow mid-run at shutdown can simply be re-run
+            if workflow.status == StepStatus.RUNNING:
+                workflow.status = StepStatus.PENDING
+            self.workflows.add_workflow(workflow)
+        if self._tasks or self.workflows.list_workflows():
+            logger.info(
+                f"Restored {len(self._tasks)} tasks "
+                f"({requeued} re-enqueued) and "
+                f"{len(self.workflows.list_workflows())} workflows from {self.store.path}"
+            )
+
+    def _persist_task(self, record: Dict[str, Any]) -> None:
+        if self.store:
+            self.store.upsert_task(record)
+
+    def persist_workflow(self, workflow) -> None:
+        if self.store:
+            self.store.upsert_workflow(workflow.to_dict())
 
     def register_hook(self, event: str, callback: Callable) -> None:
         if event in self._hooks:
@@ -66,11 +113,14 @@ class OrchestrationEngine:
             "id": task_id,
             "target_agent": target_agent,
             "payload": task["payload"],
+            "queue": queue,
+            "priority": priority,
             "status": "queued",
             "result": None,
             "error": None,
             "submitted_at": time.time(),
         }
+        self._persist_task(self._tasks[task_id])
         return task_id
 
     def get_task(self, task_id: str) -> Optional[Dict[str, Any]]:
@@ -92,9 +142,11 @@ class OrchestrationEngine:
             return False
 
         workflow.status = StepStatus.RUNNING
+        self.persist_workflow(workflow)
         for step in workflow.steps:
             step.status = StepStatus.RUNNING
             step.error = None
+            self.persist_workflow(workflow)
             try:
                 if step.target_agent:
                     task_id = self.submit_task(step.target_agent, payload=dict(step.payload))
@@ -114,13 +166,16 @@ class OrchestrationEngine:
                     loop = asyncio.get_event_loop()
                     step.result = await loop.run_in_executor(self.executor, step.handler)
                 step.status = StepStatus.COMPLETED
+                self.persist_workflow(workflow)
             except Exception as e:
                 step.error = str(e)
                 step.status = StepStatus.FAILED
                 workflow.status = StepStatus.FAILED
+                self.persist_workflow(workflow)
                 return False
 
         workflow.status = StepStatus.COMPLETED
+        self.persist_workflow(workflow)
         return True
 
     def throughput(self, window: int = 300, bucket: int = 10) -> List[Dict[str, Any]]:
@@ -211,6 +266,8 @@ class OrchestrationEngine:
             record["completed_at"] = time.time()
             self._outcomes.append((record["completed_at"], "completed"))
             agent["metrics"]["tasks_completed"] += 1
+            self._persist_task(record)
+            self.registry.touch(agent_id)
 
             for hook in self._hooks["post_execute"]:
                 await hook(task, result)
@@ -228,6 +285,9 @@ class OrchestrationEngine:
             record["status"] = "retrying" if will_retry else "failed"
             if not will_retry:
                 self._outcomes.append((time.time(), "failed"))
+            self._persist_task(record)
+            if agent:
+                self.registry.touch(agent_id)
             for hook in self._hooks["on_error"]:
                 await hook(task, e)
 

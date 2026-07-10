@@ -68,6 +68,8 @@ def _check(result: dict) -> dict:
 def cmd_serve(args) -> None:
     import uvicorn
 
+    if args.db:
+        os.environ["AO_DB_PATH"] = args.db
     uvicorn.run(
         "src.api.server:create_app",
         factory=True,
@@ -188,6 +190,8 @@ def cli() -> None:
     serve_parser.add_argument("--host", default="127.0.0.1")
     serve_parser.add_argument("--port", type=int, default=8000)
     serve_parser.add_argument("--reload", action="store_true", help="Auto-reload on code changes")
+    serve_parser.add_argument("--db", default=None, metavar="PATH",
+                              help="SQLite file for persistent state (default: $AO_DB_PATH, or in-memory)")
     serve_parser.set_defaults(func=cmd_serve)
 
     init_parser = subparsers.add_parser("init", help="Initialize a new project")
