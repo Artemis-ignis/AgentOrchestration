@@ -50,6 +50,28 @@ class TestOrchestrationEngine:
 
         assert engine.get_task(task_id)["result"] == 42
 
+    def test_throughput_buckets_outcomes(self):
+        import time
+
+        engine = OrchestrationEngine()
+        now = time.time()
+        engine._outcomes.append((now - 400, "completed"))  # outside window
+        engine._outcomes.append((now - 20, "completed"))
+        engine._outcomes.append((now - 20, "failed"))
+        engine._outcomes.append((now - 1, "completed"))
+
+        buckets = engine.throughput(window=300, bucket=10)
+        assert len(buckets) in (30, 31)
+        assert sum(b["completed"] for b in buckets) == 2
+        assert sum(b["failed"] for b in buckets) == 1
+        assert all(b["t"] % 10 == 0 for b in buckets)
+
+    def test_stats_includes_throughput(self):
+        engine = OrchestrationEngine()
+        stats = engine.stats()
+        assert isinstance(stats["throughput"], list)
+        assert all("completed" in b and "failed" in b for b in stats["throughput"])
+
     def test_failing_task_retries_then_fails(self):
         engine = OrchestrationEngine(registry=None, scheduler=None)
         engine.scheduler._max_retries = 1
