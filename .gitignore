@@ -18,6 +18,9 @@ htmlcov/
 # Environment
 .env
 
+# Local orchestrator state
+*.db
+
 # Editors
 .idea/
 .vscode/

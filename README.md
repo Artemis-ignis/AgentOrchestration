@@ -20,7 +20,7 @@ A distributed platform for orchestrating autonomous AI agents in enterprise envi
 
 ## Dashboard
 
-The built-in dashboard is served at `/` — live agent status, throughput, workflows, task queue, and platform metrics, refreshed every 2 seconds. Agents can be started and stopped from the table, tasks can be submitted straight from the form, workflows run with one click and show per-step progress, and clicking any agent or task opens its full detail. Light and dark themes follow your system.
+The built-in dashboard is served at `/` — live agent status, throughput, workflows, task queue, and platform metrics, refreshed every 2 seconds. Agents can be started and stopped from the table, tasks can be submitted straight from the form, workflows can be created in a visual builder and run with one click showing per-step progress, and clicking any agent or task opens its full detail. Light and dark themes follow your system.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/assets/dashboard-dark.png">
@@ -100,6 +100,16 @@ Point the CLI at a remote orchestrator with `--api-url` (or `$AO_API_URL`), and
 authenticate with `--api-key` (or `$AO_API_KEY`). The server requires a Bearer
 token only when started with `AO_API_KEY` set — with no key configured, auth is
 disabled for local development.
+
+### Persistence
+
+State is in-memory by default. Point the server at a SQLite file to make
+agents, task history, and workflows survive restarts — tasks that were still
+queued or running when the server stopped are automatically re-enqueued:
+
+```bash
+uv run ao serve --db ao.db        # or: AO_DB_PATH=ao.db uv run ao serve
+```
 
 ### REST API
 
